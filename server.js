@@ -233,33 +233,12 @@ app.use('/api/users', authMiddleware, require('./api/users'));
 // User alias routes for Angular compatibility
 app.use('/api/user', authMiddleware, require('./api/users'));
 
-// Measurements (ปิดไว้เพราะไม่มี MongoDB)
-app.get('/api/measurements/:deviceId', authMiddleware, async (req, res) => {
-  res.status(501).json({
-    message: 'Measurements endpoint not available - MongoDB disabled',
-    deviceId: req.params.deviceId,
-  });
-});
+// Measurement routes (PostgreSQL)
+app.use('/api/measurements', authMiddleware, require('./api/measurement'));
 
-app.post('/api/measurements', authMiddleware, async (req, res) => {
-  res.status(501).json({
-    message: 'Cannot save measurement - MongoDB disabled',
-  });
-});
+// Area routes (PostgreSQL)
+app.use('/api/areas', authMiddleware, require('./api/area'));
 
-// Areas (placeholder)
-app.get('/api/areas/:username', authMiddleware, async (req, res) => {
-  res.status(501).json({
-    message: 'Areas endpoint not available - MongoDB disabled',
-    username: req.params.username,
-  });
-});
-
-app.post('/api/areas', authMiddleware, async (req, res) => {
-  res.status(501).json({
-    message: 'Cannot create area - MongoDB disabled',
-  });
-});
 
 /* --------------------
  * Global Error Handler

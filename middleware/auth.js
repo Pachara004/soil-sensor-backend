@@ -5,11 +5,9 @@ const { pool } = require('../config/db');
 const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization || '';
-    console.log('🔍 Auth header:', authHeader);
     const token = authHeader.startsWith('Bearer ')
       ? authHeader.split(' ')[1]
       : null;
-    console.log('🔑 Token received:', token ? `${token.substring(0, 20)}...` : 'null');
     if (!token) return res.status(401).json({ message: 'No token' });
 
     // 1) Verify Firebase ID token
@@ -89,8 +87,6 @@ const authMiddleware = async (req, res, next) => {
 
     return next();
   } catch (err) {
-    console.error('Auth middleware error:', err.message);
-    console.error('Full error:', err);
     const message = err && err.message ? err.message : 'Unauthorized';
     return res.status(401).json({ message });
   }
