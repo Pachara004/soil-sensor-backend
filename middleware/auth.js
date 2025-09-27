@@ -57,17 +57,17 @@ const authMiddleware = async (req, res, next) => {
       // attempt insert with firebase_uid; if column missing, insert without it
       try {
         const insert = await pool.query(
-          `INSERT INTO users (user_name, user_email, user_password, user_phone, role, firebase_uid)
-           VALUES ($1, $2, NULL, NULL, 'user', $3)
-           RETURNING userid, user_name, user_email, role, firebase_uid`,
+          `INSERT INTO users (user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at)
+           VALUES ($1, $2, NULL, 'user', $3, NOW(), NOW())
+           RETURNING userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
           [username, email, firebaseUid]
         );
         userRow = insert.rows[0];
       } catch (e) {
         const insert2 = await pool.query(
-          `INSERT INTO users (user_name, user_email, user_password, user_phone, role)
-           VALUES ($1, $2, NULL, NULL, 'user')
-           RETURNING userid, user_name, user_email, role`,
+          `INSERT INTO users (user_name, user_email, user_phone, role, created_at, updated_at)
+           VALUES ($1, $2, NULL, 'user', NOW(), NOW())
+           RETURNING userid, user_name, user_email, user_phone, role, created_at, updated_at`,
           [username, email]
         );
         userRow = insert2.rows[0];

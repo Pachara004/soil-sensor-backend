@@ -35,6 +35,8 @@ router.get('/areas', authMiddleware, async (req, res) => {
 // Create new measurement
 router.post('/', authMiddleware, async (req, res) => {
   try {
+    console.log('📊 Measurement request body:', req.body);
+
     const {
       deviceid,
       measurement_date,
@@ -53,6 +55,7 @@ router.post('/', authMiddleware, async (req, res) => {
     } = req.body;
 
     if (!deviceid || !measurement_date || !measurement_time) {
+      console.log('❌ Missing required fields:', { deviceid, measurement_date, measurement_time });
       return res.status(400).json({ message: 'Device ID, measurement date, and time are required' });
     }
 

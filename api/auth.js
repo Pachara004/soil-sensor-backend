@@ -31,8 +31,8 @@ router.post('/register', async (req, res) => {
 
     // บันทึกข้อมูลใน PostgreSQL พร้อม firebase_uid
     const result = await pool.query(
-      `INSERT INTO users (user_name, user_email, user_phone, role, firebase_uid)
-           VALUES ($1, $2, $3, $4, $5) RETURNING userid, user_name, user_email, firebase_uid`,
+      `INSERT INTO users (user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
       [username, email, phoneNumber || null, type || 'user', uid]
     );
 
@@ -87,34 +87,84 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Verify Google ID token and login/create user (เลือกใช้ได้ ถ้า config Firebase Admin ครบ)
+// Verify Google ID token and login/create user (Firebase Auth)
 router.post('/google-login', async (req, res) => {
   const { idToken } = req.body;
   try {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { email, name } = decodedToken;
+    const { uid: firebaseUid, email, name } = decodedToken;
 
-    const { rows } = await pool.query(
-      'SELECT userid, user_name, user_email, role FROM users WHERE user_email = $1 LIMIT 1',
-      [email]
-    );
-    let user = rows[0];
+    // Find or create user in PostgreSQL
+    let user = null;
 
-    if (!user) {
-      const username = (email || '').split('@')[0] || `user_${Date.now()}`;
-      const randomPassword = await bcrypt.hash(Math.random().toString(36), 10);
-      const insert = await pool.query(
-        `INSERT INTO users (user_name, user_email, user_password, role)
-         VALUES ($1,$2,$3,$4) RETURNING userid, user_name, user_email, role`,
-        [username, name || username, email, randomPassword, 'user']
+    // Try to find by firebase_uid first
+    try {
+      const byUid = await pool.query(
+        'SELECT userid, user_name, user_email, role, firebase_uid FROM users WHERE firebase_uid = $1 LIMIT 1',
+        [firebaseUid]
       );
-      user = insert.rows[0];
+      user = byUid.rows[0] || null;
+    } catch (e) {
+      // firebase_uid column may not exist
     }
 
-    const payload = { userid: user.userid, username: user.user_name, user_name: user.user_name, role: user.role || 'user' };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, user: { userid: user.userid, username: user.user_name, email: user.user_email, name: user.user_name, role: user.role || 'user' } });
+    // Fallback: find by email
+    if (!user && email) {
+      const byEmail = await pool.query(
+        'SELECT userid, user_name, user_email, role FROM users WHERE user_email = $1 LIMIT 1',
+        [email]
+      );
+      user = byEmail.rows[0] || null;
+
+      // Update firebase_uid if found by email
+      if (user) {
+        try {
+          await pool.query(
+            'UPDATE users SET firebase_uid = $1, updated_at = NOW() WHERE user_email = $2',
+            [firebaseUid, email]
+          );
+        } catch (e) {
+          // firebase_uid column may not exist
+        }
+      }
+    }
+
+    // Create new user if not found
+    if (!user) {
+      const username = email ? email.split('@')[0] : `user_${firebaseUid.slice(0, 8)}`;
+      try {
+        const insert = await pool.query(
+          `INSERT INTO users (user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at)
+           VALUES ($1, $2, NULL, 'user', $3, NOW(), NOW())
+           RETURNING userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
+          [username, email, firebaseUid]
+        );
+        user = insert.rows[0];
+      } catch (e) {
+        const insert2 = await pool.query(
+          `INSERT INTO users (user_name, user_email, user_phone, role, created_at, updated_at)
+           VALUES ($1, $2, NULL, 'user', NOW(), NOW())
+           RETURNING userid, user_name, user_email, user_phone, role, created_at, updated_at`,
+          [username, email]
+        );
+        user = insert2.rows[0];
+      }
+    }
+
+    // Return user data (no JWT token needed for Firebase Auth)
+    res.json({
+      message: 'Google login successful',
+      user: {
+        userid: user.userid,
+        username: user.user_name,
+        user_name: user.user_name,
+        email: user.user_email,
+        role: user.role || 'user',
+        firebase_uid: firebaseUid
+      }
+    });
   } catch (err) {
+    console.error('Google login error:', err);
     res.status(401).json({ message: 'Invalid Google token' });
   }
 });
