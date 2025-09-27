@@ -239,6 +239,9 @@ app.use('/api/measurements', authMiddleware, require('./api/measurement'));
 // Area routes (PostgreSQL)
 app.use('/api/areas', authMiddleware, require('./api/area'));
 
+// Report routes (PostgreSQL)
+app.use('/api/reports', authMiddleware, require('./api/report'));
+
 
 /* --------------------
  * Global Error Handler
