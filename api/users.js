@@ -41,12 +41,32 @@ router.get('/all', authMiddleware, async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT userid, user_name, user_fullname, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
 
     res.json({ users: rows });
   } catch (err) {
     console.error('Error fetching all users:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get only regular users (role = 'user') - admin only
+router.get('/regular', authMiddleware, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin role required.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE role = $1 ORDER BY created_at DESC',
+      ['user']
+    );
+
+    res.json({ users: rows });
+  } catch (err) {
+    console.error('Error fetching regular users:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -62,7 +82,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT userid, user_name, user_fullname, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
       [id]
     );
 
@@ -240,7 +260,7 @@ router.get('/stats/overview', authMiddleware, async (req, res) => {
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT userid, user_name, user_fullname, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
       [req.user.userid]
     );
 
@@ -258,7 +278,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT userid, user_name, user_fullname, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
       [req.user.userid]
     );
 
