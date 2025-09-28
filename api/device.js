@@ -7,7 +7,11 @@ const authMiddleware = require('../middleware/auth');
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM device WHERE userid = $1 ORDER BY created_at DESC',
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.userid = $1 
+       ORDER BY d.created_at DESC`,
       [req.user.userid]
     );
     res.json(rows);
@@ -21,20 +25,20 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/by-username/:username', authMiddleware, async (req, res) => {
   try {
     const { username } = req.params;
-    // First get userid from username
-    const { rows: userRows } = await pool.query(
-      'SELECT userid FROM users WHERE user_name = $1',
+
+    const { rows } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE u.user_name = $1 
+       ORDER BY d.created_at DESC`,
       [username]
     );
 
-    if (userRows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found or no devices found' });
     }
 
-    const { rows } = await pool.query(
-      'SELECT * FROM device WHERE userid = $1 ORDER BY created_at DESC',
-      [userRows[0].userid]
-    );
     res.json(rows);
   } catch (err) {
     console.error('Error fetching devices by username:', err);
@@ -57,7 +61,16 @@ router.post('/', authMiddleware, async (req, res) => {
       [device_name, device_id || null, req.user.userid]
     );
 
-    res.status(201).json({ message: 'Device added successfully', device: rows[0] });
+    // Get device with user info
+    const { rows: deviceWithUser } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.deviceid = $1`,
+      [rows[0].deviceid]
+    );
+
+    res.status(201).json({ message: 'Device added successfully', device: deviceWithUser[0] });
   } catch (err) {
     console.error('Error adding device:', err);
     res.status(500).json({ message: err.message });
@@ -92,7 +105,16 @@ router.post('/claim-device', authMiddleware, async (req, res) => {
       [deviceId, `Device ${deviceId}`, deviceId, req.user.userid]
     );
 
-    res.json({ message: 'Device claimed', device: rows[0] });
+    // Get device with user info
+    const { rows: deviceWithUser } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.deviceid = $1`,
+      [deviceId]
+    );
+
+    res.json({ message: 'Device claimed', device: deviceWithUser[0] });
   } catch (err) {
     console.error('Error claiming device:', err);
     res.status(500).json({ message: err.message });
@@ -117,7 +139,16 @@ router.put('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Device not found or not owned by user' });
     }
 
-    res.json({ message: 'Device updated', device: rows[0] });
+    // Get updated device with user info
+    const { rows: deviceWithUser } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.deviceid = $1`,
+      [id]
+    );
+
+    res.json({ message: 'Device updated', device: deviceWithUser[0] });
   } catch (err) {
     console.error('Error updating device:', err);
     res.status(500).json({ message: err.message });
@@ -160,7 +191,16 @@ router.post('/add', authMiddleware, async (req, res) => {
       [device_name, device_id || null, req.user.userid]
     );
 
-    res.status(201).json({ message: 'Device added successfully', device: rows[0] });
+    // Get device with user info
+    const { rows: deviceWithUser } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.deviceid = $1`,
+      [rows[0].deviceid]
+    );
+
+    res.status(201).json({ message: 'Device added successfully', device: deviceWithUser[0] });
   } catch (err) {
     console.error('Error adding device:', err);
     res.status(500).json({ message: err.message });
@@ -195,7 +235,16 @@ router.post('/claim', authMiddleware, async (req, res) => {
       [deviceId, `Device ${deviceId}`, deviceId, req.user.userid]
     );
 
-    res.json({ message: 'Device claimed', device: rows[0] });
+    // Get device with user info
+    const { rows: deviceWithUser } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.deviceid = $1`,
+      [deviceId]
+    );
+
+    res.json({ message: 'Device claimed', device: deviceWithUser[0] });
   } catch (err) {
     console.error('Error claiming device:', err);
     res.status(500).json({ message: err.message });

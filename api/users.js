@@ -124,10 +124,13 @@ router.get('/username/:username', authMiddleware, async (req, res) => {
 });
 
 // Update user profile
+// Update user profile (both admin and user)
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const { user_name, user_phone } = req.body;
+    const { user_name, user_phone, user_email } = req.body;
+
+    console.log('👤 Update user request:', { id, user_name, user_phone, user_email, requester: req.user.userid, role: req.user.role });
 
     // Users can only update their own profile unless they're admin
     if (req.user.role !== 'admin' && req.user.userid !== parseInt(id)) {
@@ -146,23 +149,37 @@ router.put('/:id', authMiddleware, async (req, res) => {
       }
     }
 
+    // Check if email is unique (excluding current user) - only if email is being updated
+    if (user_email) {
+      const { rows: existingEmail } = await pool.query(
+        'SELECT userid FROM users WHERE user_email = $1 AND userid != $2',
+        [user_email, id]
+      );
+
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ message: 'Email already taken' });
+      }
+    }
+
     const { rows } = await pool.query(
       `UPDATE users 
        SET user_name = COALESCE($1, user_name),
            user_phone = COALESCE($2, user_phone),
+           user_email = COALESCE($3, user_email),
            updated_at = NOW()
-       WHERE userid = $3
+       WHERE userid = $4
        RETURNING userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
-      [user_name, user_phone, id]
+      [user_name, user_phone, user_email, id]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    console.log('✅ User updated successfully:', rows[0]);
     res.json({ message: 'User updated successfully', user: rows[0] });
   } catch (err) {
-    console.error('Error updating user:', err);
+    console.error('❌ Error updating user:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -289,6 +306,67 @@ router.get('/me', authMiddleware, async (req, res) => {
     return res.json({ user: rows[0] });
   } catch (err) {
     console.error('Error fetching user profile:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Change password (both admin and user)
+router.put('/:id/password', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
+
+    console.log('🔐 Change password request:', { id, requester: req.user.userid, role: req.user.role });
+
+    // Users can only change their own password unless they're admin
+    if (req.user.role !== 'admin' && req.user.userid !== parseInt(id)) {
+      return res.status(403).json({ message: 'Access denied. You can only change your own password.' });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+    }
+
+    // Get current user data
+    const { rows: userRows } = await pool.query(
+      'SELECT userid, user_password FROM users WHERE userid = $1',
+      [id]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = userRows[0];
+
+    // Verify current password (only for non-admin users changing their own password)
+    if (req.user.role !== 'admin' || req.user.userid === parseInt(id)) {
+      const bcrypt = require('bcryptjs');
+      const isValidPassword = await bcrypt.compare(currentPassword, user.user_password);
+
+      if (!isValidPassword) {
+        return res.status(401).json({ message: 'Current password is incorrect' });
+      }
+    }
+
+    // Hash new password
+    const bcrypt = require('bcryptjs');
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password in database
+    const { rows } = await pool.query(
+      'UPDATE users SET user_password = $1, updated_at = NOW() WHERE userid = $2 RETURNING userid, user_name, user_email',
+      [hashedNewPassword, id]
+    );
+
+    console.log('✅ Password changed successfully for user:', rows[0].user_name);
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error('❌ Error changing password:', err);
     res.status(500).json({ message: err.message });
   }
 });

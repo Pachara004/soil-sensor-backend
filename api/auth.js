@@ -192,16 +192,117 @@ router.post('/send-otp', async (req, res) => {
   const subject = `${siteName} - OTP สำหรับยืนยันอีเมล`;
   const body = `รหัส OTP ของคุณคือ: ${otp}\n\nใช้ได้ภายใน 5 นาที\nจากระบบ ${siteName}\n\nหมายเลขอ้างอิง: ${ref}`;
   await sendEmail(email, subject, body);
+
+  console.log('📧 OTP sent:', { email, otp, ref, expiresAt: new Date(Date.now() + ttlMs) });
   res.json({ message: 'OTP sent', ref });
 });
 
-router.post('/reset-password', async (req, res) => {
-  const { email, otp, newPassword } = req.body;
-  if (global.otps && global.otps[email] !== otp) return res.status(400).json({ message: 'Invalid OTP' });
-  const hashed = await bcrypt.hash(newPassword, 10);
-  await pool.query('UPDATE users SET user_password=$1, updated_at=NOW() WHERE user_email=$2', [hashed, email]);
-  delete global.otps[email];
-  res.json({ message: 'Password reset' });
+router.put('/reset-password', async (req, res) => {
+  try {
+    console.log('🔐 Reset password request body:', req.body);
+    const { email, otp, newPassword, referenceNumber } = req.body;
+
+    console.log('🔍 Parsed fields:', {
+      email: !!email,
+      otp: !!otp,
+      newPassword: !!newPassword,
+      referenceNumber: !!referenceNumber
+    });
+
+    if (!email || !otp || !newPassword) {
+      console.log('❌ Missing required fields:', { email: !!email, otp: !!otp, newPassword: !!newPassword });
+      return res.status(400).json({ message: 'Email, OTP, and new password are required' });
+    }
+
+    // ตรวจสอบ OTP จาก otpStore
+    const store = global.otpStore || {};
+    const entry = store[email];
+
+    console.log('🔍 OTP Store check:', {
+      email,
+      hasEntry: !!entry,
+      storeKeys: Object.keys(store),
+      entryExpires: entry ? new Date(entry.expiresAt) : null,
+      entryCode: entry ? entry.code : null,
+      entryRef: entry ? entry.ref : null,
+      currentTime: new Date(),
+      isExpired: entry ? Date.now() > entry.expiresAt : true
+    });
+
+    if (!entry) {
+      return res.status(400).json({ message: 'OTP not found or expired' });
+    }
+
+    if (Date.now() > entry.expiresAt) {
+      delete global.otpStore[email];
+      return res.status(400).json({ message: 'OTP expired' });
+    }
+
+    console.log('🔍 OTP Comparison:', {
+      receivedOtp: otp,
+      storedOtp: entry.code,
+      otpMatch: entry.code === otp
+    });
+
+    if (entry.code !== otp) {
+      console.log('❌ OTP mismatch:', { received: otp, stored: entry.code });
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+
+    // ตรวจสอบว่า OTP ถูก verify แล้วหรือไม่
+    if (!entry.verified) {
+      console.log('❌ OTP not verified yet');
+      return res.status(400).json({ message: 'OTP must be verified first' });
+    }
+
+    // Hash รหัสผ่านใหม่
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    // อัปเดตรหัสผ่านในฐานข้อมูล
+    const result = await pool.query(
+      'UPDATE users SET user_password=$1, updated_at=NOW() WHERE user_email=$2 RETURNING userid, firebase_uid',
+      [hashed, email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = result.rows[0];
+
+    // อัปเดตรหัสผ่านใน Firebase Auth (ถ้ามี firebase_uid)
+    if (user.firebase_uid) {
+      try {
+        console.log('🔥 Updating Firebase Auth password for UID:', user.firebase_uid);
+        await admin.auth().updateUser(user.firebase_uid, {
+          password: newPassword
+        });
+        console.log('✅ Firebase Auth password updated successfully');
+      } catch (firebaseError) {
+        console.error('❌ Firebase Auth update error:', firebaseError);
+        // ไม่ return error เพราะ database update สำเร็จแล้ว
+        // แค่ log error และดำเนินการต่อ
+      }
+    } else {
+      console.log('ℹ️ No Firebase UID found, skipping Firebase Auth update');
+    }
+
+    // ลบ OTP หลังใช้แล้ว
+    if (entry.timeout) clearTimeout(entry.timeout);
+    delete global.otpStore[email];
+
+    console.log('✅ Password reset successful for:', email);
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('❌ Reset password error:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      stack: err.stack,
+      code: err.code,
+      detail: err.detail
+    });
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
 // Verify OTP (for registration)
@@ -218,9 +319,11 @@ router.post('/verify-otp', async (req, res) => {
   }
   if (entry.code !== otp) return res.status(400).json({ message: 'Invalid OTP' });
 
-  // ลบ OTP หลังใช้แล้ว
-  if (entry.timeout) clearTimeout(entry.timeout);
-  delete global.otpStore[email];
+  // ไม่ลบ OTP หลัง verify เพื่อให้ใช้ใน reset password ได้
+  // เพิ่ม flag เพื่อระบุว่า OTP ถูก verify แล้ว
+  entry.verified = true;
+
+  console.log('✅ OTP verified for:', email);
   res.json({ message: 'OTP verified' });
 });
 
