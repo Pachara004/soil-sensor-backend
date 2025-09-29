@@ -3,6 +3,12 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const authMiddleware = require('../middleware/auth');
 
+// Helper function to determine device_type based on device name
+const getDeviceType = (deviceName) => {
+  if (!deviceName) return true; // Default to true if no name
+  return !deviceName.toLowerCase().includes('test');
+};
+
 // Get devices for current user
 router.get('/', authMiddleware, async (req, res) => {
   try {
@@ -14,7 +20,14 @@ router.get('/', authMiddleware, async (req, res) => {
        ORDER BY d.created_at DESC`,
       [req.user.userid]
     );
-    res.json(rows);
+
+    // Add device_type to each device based on device_name
+    const devicesWithType = rows.map(device => ({
+      ...device,
+      device_type: getDeviceType(device.device_name)
+    }));
+
+    res.json(devicesWithType);
   } catch (err) {
     console.error('Error fetching devices:', err);
     res.status(500).json({ message: err.message });
@@ -39,7 +52,13 @@ router.get('/by-username/:username', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'User not found or no devices found' });
     }
 
-    res.json(rows);
+    // Add device_type to each device based on device_name
+    const devicesWithType = rows.map(device => ({
+      ...device,
+      device_type: getDeviceType(device.device_name)
+    }));
+
+    res.json(devicesWithType);
   } catch (err) {
     console.error('Error fetching devices by username:', err);
     res.status(500).json({ message: err.message });
@@ -49,16 +68,35 @@ router.get('/by-username/:username', authMiddleware, async (req, res) => {
 // Add new device
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { device_name, device_id } = req.body;
+    const { device_name, device_id, deviceId, status, description } = req.body;
+
+    // Handle both device_id and deviceId fields for compatibility
+    const finalDeviceId = device_id || deviceId;
+
     if (!device_name) {
       return res.status(400).json({ message: 'Device name is required' });
     }
 
+    // Determine device_type based on device_name
+    const device_type = getDeviceType(device_name);
+
+    // Check if device already exists
+    if (finalDeviceId) {
+      const { rows: existingDevice } = await pool.query(
+        'SELECT * FROM device WHERE device_id = $1',
+        [finalDeviceId]
+      );
+
+      if (existingDevice.length > 0) {
+        return res.status(400).json({ message: 'Device with this ID already exists' });
+      }
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO device (device_name, device_id, userid, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
+      `INSERT INTO device (device_name, device_id, device_type, userid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING *`,
-      [device_name, device_id || null, req.user.userid]
+      [device_name, finalDeviceId || null, device_type, req.user.userid]
     );
 
     // Get device with user info
@@ -70,7 +108,13 @@ router.post('/', authMiddleware, async (req, res) => {
       [rows[0].deviceid]
     );
 
-    res.status(201).json({ message: 'Device added successfully', device: deviceWithUser[0] });
+    // Add device_type to response
+    const deviceResponse = {
+      ...deviceWithUser[0],
+      device_type: getDeviceType(deviceWithUser[0].device_name)
+    };
+
+    res.status(201).json({ message: 'Device added successfully', device: deviceResponse });
   } catch (err) {
     console.error('Error adding device:', err);
     res.status(500).json({ message: err.message });
@@ -95,14 +139,18 @@ router.post('/claim-device', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Device bound to another user' });
     }
 
+    // Determine device_type based on device name
+    const deviceName = `Device ${deviceId}`;
+    const device_type = getDeviceType(deviceName);
+
     // Update or insert device
     const { rows } = await pool.query(
-      `INSERT INTO device (deviceid, device_name, device_id, userid, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+      `INSERT INTO device (deviceid, device_name, device_id, device_type, userid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        ON CONFLICT (deviceid) 
-       DO UPDATE SET userid = $4, updated_at = NOW()
+       DO UPDATE SET userid = $5, device_type = $4, updated_at = NOW()
        RETURNING *`,
-      [deviceId, `Device ${deviceId}`, deviceId, req.user.userid]
+      [deviceId, deviceName, deviceId, device_type, req.user.userid]
     );
 
     // Get device with user info
@@ -114,7 +162,13 @@ router.post('/claim-device', authMiddleware, async (req, res) => {
       [deviceId]
     );
 
-    res.json({ message: 'Device claimed', device: deviceWithUser[0] });
+    // Add device_type to response
+    const deviceResponse = {
+      ...deviceWithUser[0],
+      device_type: getDeviceType(deviceWithUser[0].device_name)
+    };
+
+    res.json({ message: 'Device claimed', device: deviceResponse });
   } catch (err) {
     console.error('Error claiming device:', err);
     res.status(500).json({ message: err.message });
@@ -127,12 +181,15 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const { device_name } = req.body;
 
+    // Determine device_type based on device_name
+    const device_type = getDeviceType(device_name);
+
     const { rows } = await pool.query(
       `UPDATE device 
-       SET device_name = $1, updated_at = NOW()
-       WHERE deviceid = $2 AND userid = $3
+       SET device_name = $1, device_type = $2, updated_at = NOW()
+       WHERE deviceid = $3 AND userid = $4
        RETURNING *`,
-      [device_name, id, req.user.userid]
+      [device_name, device_type, id, req.user.userid]
     );
 
     if (rows.length === 0) {
@@ -148,7 +205,13 @@ router.put('/:id', authMiddleware, async (req, res) => {
       [id]
     );
 
-    res.json({ message: 'Device updated', device: deviceWithUser[0] });
+    // Add device_type to response
+    const deviceResponse = {
+      ...deviceWithUser[0],
+      device_type: getDeviceType(deviceWithUser[0].device_name)
+    };
+
+    res.json({ message: 'Device updated', device: deviceResponse });
   } catch (err) {
     console.error('Error updating device:', err);
     res.status(500).json({ message: err.message });
@@ -179,16 +242,35 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 // Add device endpoint for Angular compatibility
 router.post('/add', authMiddleware, async (req, res) => {
   try {
-    const { device_name, device_id } = req.body;
+    const { device_name, device_id, deviceId, status, description } = req.body;
+
+    // Handle both device_id and deviceId fields for compatibility
+    const finalDeviceId = device_id || deviceId;
+
     if (!device_name) {
       return res.status(400).json({ message: 'Device name is required' });
     }
 
+    // Determine device_type based on device_name
+    const device_type = getDeviceType(device_name);
+
+    // Check if device already exists
+    if (finalDeviceId) {
+      const { rows: existingDevice } = await pool.query(
+        'SELECT * FROM device WHERE device_id = $1',
+        [finalDeviceId]
+      );
+
+      if (existingDevice.length > 0) {
+        return res.status(400).json({ message: 'Device with this ID already exists' });
+      }
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO device (device_name, device_id, userid, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
+      `INSERT INTO device (device_name, device_id, device_type, userid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING *`,
-      [device_name, device_id || null, req.user.userid]
+      [device_name, finalDeviceId || null, device_type, req.user.userid]
     );
 
     // Get device with user info
@@ -200,7 +282,13 @@ router.post('/add', authMiddleware, async (req, res) => {
       [rows[0].deviceid]
     );
 
-    res.status(201).json({ message: 'Device added successfully', device: deviceWithUser[0] });
+    // Add device_type to response
+    const deviceResponse = {
+      ...deviceWithUser[0],
+      device_type: getDeviceType(deviceWithUser[0].device_name)
+    };
+
+    res.status(201).json({ message: 'Device added successfully', device: deviceResponse });
   } catch (err) {
     console.error('Error adding device:', err);
     res.status(500).json({ message: err.message });
@@ -225,14 +313,18 @@ router.post('/claim', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Device bound to another user' });
     }
 
+    // Determine device_type based on device name
+    const deviceName = `Device ${deviceId}`;
+    const device_type = getDeviceType(deviceName);
+
     // Update or insert device
     const { rows } = await pool.query(
-      `INSERT INTO device (deviceid, device_name, device_id, userid, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+      `INSERT INTO device (deviceid, device_name, device_id, device_type, userid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        ON CONFLICT (deviceid) 
-       DO UPDATE SET userid = $4, updated_at = NOW()
+       DO UPDATE SET userid = $5, device_type = $4, updated_at = NOW()
        RETURNING *`,
-      [deviceId, `Device ${deviceId}`, deviceId, req.user.userid]
+      [deviceId, deviceName, deviceId, device_type, req.user.userid]
     );
 
     // Get device with user info
@@ -244,7 +336,13 @@ router.post('/claim', authMiddleware, async (req, res) => {
       [deviceId]
     );
 
-    res.json({ message: 'Device claimed', device: deviceWithUser[0] });
+    // Add device_type to response
+    const deviceResponse = {
+      ...deviceWithUser[0],
+      device_type: getDeviceType(deviceWithUser[0].device_name)
+    };
+
+    res.json({ message: 'Device claimed', device: deviceResponse });
   } catch (err) {
     console.error('Error claiming device:', err);
     res.status(500).json({ message: err.message });
