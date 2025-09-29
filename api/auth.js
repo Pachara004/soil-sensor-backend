@@ -427,4 +427,217 @@ router.get('/user/me', require('../middleware/auth'), async (req, res) => {
   }
 });
 
+// Delete user account (both Firebase Auth and PostgreSQL)
+router.delete('/delete-account', require('../middleware/auth'), async (req, res) => {
+  try {
+    console.log('🗑️ Delete account request for user:', req.user.userid);
+
+    // Get user data first
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, firebase_uid FROM users WHERE userid=$1',
+      [req.user.userid]
+    );
+
+    if (!rows[0]) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = rows[0];
+    console.log('👤 User to delete:', {
+      userid: user.userid,
+      user_name: user.user_name,
+      user_email: user.user_email,
+      firebase_uid: user.firebase_uid
+    });
+
+    // Start transaction to ensure data consistency
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // 1. Delete related data first (to avoid foreign key constraints)
+      console.log('🗑️ Deleting related data...');
+
+      // Delete areas_at relationships
+      await client.query('DELETE FROM areas_at WHERE areasid IN (SELECT areasid FROM areas WHERE userid = $1)', [user.userid]);
+      console.log('✅ Deleted areas_at relationships');
+
+      // Delete areas
+      await client.query('DELETE FROM areas WHERE userid = $1', [user.userid]);
+      console.log('✅ Deleted areas');
+
+      // Delete measurements
+      await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [user.userid]);
+      console.log('✅ Deleted measurements');
+
+      // Delete devices
+      await client.query('DELETE FROM device WHERE userid = $1', [user.userid]);
+      console.log('✅ Deleted devices');
+
+      // Delete images first (they reference reports)
+      await client.query('DELETE FROM images WHERE reportid IN (SELECT reportid FROM reports WHERE userid = $1)', [user.userid]);
+      console.log('✅ Deleted images');
+
+      // Delete reports
+      await client.query('DELETE FROM reports WHERE userid = $1', [user.userid]);
+      console.log('✅ Deleted reports');
+
+      // 2. Delete user from PostgreSQL
+      await client.query('DELETE FROM users WHERE userid = $1', [user.userid]);
+      console.log('✅ Deleted user from PostgreSQL');
+
+      // 3. Delete user from Firebase Auth (if firebase_uid exists)
+      if (user.firebase_uid) {
+        try {
+          console.log('🔥 Deleting user from Firebase Auth:', user.firebase_uid);
+          await admin.auth().deleteUser(user.firebase_uid);
+          console.log('✅ Deleted user from Firebase Auth');
+        } catch (firebaseError) {
+          console.error('❌ Firebase Auth delete error:', firebaseError);
+          // Continue with PostgreSQL deletion even if Firebase fails
+          // This ensures data consistency
+        }
+      } else {
+        console.log('ℹ️ No Firebase UID found, skipping Firebase Auth deletion');
+      }
+
+      await client.query('COMMIT');
+      console.log('✅ Transaction committed successfully');
+
+      res.json({
+        message: 'Account deleted successfully',
+        deletedUser: {
+          userid: user.userid,
+          user_name: user.user_name,
+          user_email: user.user_email,
+          firebase_uid: user.firebase_uid
+        }
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Transaction rolled back:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (err) {
+    console.error('❌ Delete account error:', err);
+    res.status(500).json({
+      message: 'Failed to delete account',
+      error: err.message
+    });
+  }
+});
+
+// Admin endpoint to delete any user (admin only)
+router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async (req, res) => {
+  try {
+    // Check if current user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    const targetUserid = parseInt(req.params.userid);
+    if (!targetUserid || targetUserid === req.user.userid) {
+      return res.status(400).json({ message: 'Invalid user ID or cannot delete self' });
+    }
+
+    console.log('🗑️ Admin delete user request:', {
+      adminUserid: req.user.userid,
+      targetUserid: targetUserid
+    });
+
+    // Get target user data
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, firebase_uid FROM users WHERE userid=$1',
+      [targetUserid]
+    );
+
+    if (!rows[0]) {
+      return res.status(404).json({ message: 'Target user not found' });
+    }
+
+    const targetUser = rows[0];
+    console.log('👤 Target user to delete:', targetUser);
+
+    // Start transaction
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Delete related data
+      console.log('🗑️ Deleting related data for user:', targetUserid);
+
+      // Delete areas_at relationships
+      await client.query('DELETE FROM areas_at WHERE areasid IN (SELECT areasid FROM areas WHERE userid = $1)', [targetUserid]);
+      console.log('✅ Deleted areas_at relationships');
+
+      // Delete areas
+      await client.query('DELETE FROM areas WHERE userid = $1', [targetUserid]);
+      console.log('✅ Deleted areas');
+
+      // Delete measurements
+      await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [targetUserid]);
+      console.log('✅ Deleted measurements');
+
+      // Delete devices
+      await client.query('DELETE FROM device WHERE userid = $1', [targetUserid]);
+      console.log('✅ Deleted devices');
+
+      // Delete images first (they reference reports)
+      await client.query('DELETE FROM images WHERE reportid IN (SELECT reportid FROM reports WHERE userid = $1)', [targetUserid]);
+      console.log('✅ Deleted images');
+
+      // Delete reports
+      await client.query('DELETE FROM reports WHERE userid = $1', [targetUserid]);
+      console.log('✅ Deleted reports');
+
+      // Delete user from PostgreSQL
+      await client.query('DELETE FROM users WHERE userid = $1', [targetUserid]);
+      console.log('✅ Deleted user from PostgreSQL');
+
+      // Delete user from Firebase Auth
+      if (targetUser.firebase_uid) {
+        try {
+          console.log('🔥 Deleting user from Firebase Auth:', targetUser.firebase_uid);
+          await admin.auth().deleteUser(targetUser.firebase_uid);
+          console.log('✅ Deleted user from Firebase Auth');
+        } catch (firebaseError) {
+          console.error('❌ Firebase Auth delete error:', firebaseError);
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log('✅ Admin delete transaction committed');
+
+      res.json({
+        message: 'User deleted successfully by admin',
+        deletedUser: targetUser,
+        deletedBy: {
+          userid: req.user.userid,
+          username: req.user.username
+        }
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Admin delete transaction rolled back:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (err) {
+    console.error('❌ Admin delete user error:', err);
+    res.status(500).json({
+      message: 'Failed to delete user',
+      error: err.message
+    });
+  }
+});
+
 module.exports = router;
