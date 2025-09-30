@@ -114,6 +114,46 @@ router.get('/:deviceId', authMiddleware, async (req, res) => {
   }
 });
 
+// Create area immediately when user confirms area selection
+router.post('/create-area-immediately', authMiddleware, async (req, res) => {
+  try {
+    console.log('🏞️ Create area immediately request body:', req.body);
+
+    const {
+      area_name,
+      deviceId,
+      area_size,
+      coordinates
+    } = req.body;
+
+    if (!area_name || !deviceId) {
+      return res.status(400).json({ message: 'Area name and device ID are required' });
+    }
+
+    // Create area record without measurements (measurements will be added later)
+    const { rows: areaRows } = await pool.query(
+      `INSERT INTO areas (area_name, temperature_avg, moisture_avg, ph_avg, phosphorus_avg, potassium_avg, nitrogen_avg, totalmeasurement, userid, deviceid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+       RETURNING *`,
+      [area_name, 0, 0, 0, 0, 0, 0, 0, req.user.userid, deviceId]
+    );
+
+    const areaId = areaRows[0].areasid;
+
+    console.log('✅ Area created immediately:', { areaId, area_name });
+
+    res.json({
+      message: 'Area created successfully',
+      area: areaRows[0],
+      areaId: areaId
+    });
+
+  } catch (err) {
+    console.error('Error creating area immediately:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Create new area (when user confirms measurement location)
 router.post('/create-area', authMiddleware, async (req, res) => {
   try {
@@ -121,12 +161,36 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
     const {
       area_name,
-      measurements, // Array of measurements for this area
-      deviceId
+      measurements, // Array of measurements for this area (optional)
+      deviceId,
+      area_size,
+      coordinates
     } = req.body;
 
-    if (!area_name || !measurements || !Array.isArray(measurements) || measurements.length === 0) {
-      return res.status(400).json({ message: 'Area name and measurements array are required' });
+    if (!area_name || !deviceId) {
+      return res.status(400).json({ message: 'Area name and device ID are required' });
+    }
+
+    // If no measurements provided, create area with default values
+    if (!measurements || !Array.isArray(measurements) || measurements.length === 0) {
+      console.log('📝 Creating area without measurements (measurements will be added later)');
+
+      const { rows: areaRows } = await pool.query(
+        `INSERT INTO areas (area_name, temperature_avg, moisture_avg, ph_avg, phosphorus_avg, potassium_avg, nitrogen_avg, totalmeasurement, userid, deviceid, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+         RETURNING *`,
+        [area_name, 0, 0, 0, 0, 0, 0, 0, req.user.userid, deviceId]
+      );
+
+      const areaId = areaRows[0].areasid;
+
+      console.log('✅ Area created without measurements:', { areaId, area_name });
+
+      return res.json({
+        message: 'Area created successfully',
+        area: areaRows[0],
+        areaId: areaId
+      });
     }
 
     // Calculate averages from measurements
@@ -209,6 +273,82 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
   } catch (err) {
     console.error('Error creating area:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Save single measurement point
+router.post('/single-point', authMiddleware, async (req, res) => {
+  try {
+    console.log('📊 Save single measurement point request body:', req.body);
+
+    const {
+      deviceId,
+      temperature,
+      moisture,
+      ph,
+      phosphorus,
+      potassium,
+      nitrogen,
+      lat,
+      lng,
+      areaId,
+      location
+    } = req.body;
+
+    if (!deviceId || !temperature || !moisture || !ph || !phosphorus || !potassium || !nitrogen || !lat || !lng) {
+      return res.status(400).json({ message: 'All measurement data and coordinates are required' });
+    }
+
+    // Helper functions for precision limiting
+    const roundValue = (value, decimals, max) => {
+      const rounded = Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+      return Math.min(Math.max(rounded, 0), max);
+    };
+
+    const roundLatLng = (value, decimals) => {
+      // For precision 10, scale 8: max value is 99.99999999
+      const maxValue = 99.99999999;
+      const rounded = Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+      return Math.min(Math.max(rounded, -maxValue), maxValue);
+    };
+
+    // Generate current date and time
+    const currentDate = new Date();
+    const measurementDate = currentDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    const measurementTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS
+
+    const { rows } = await pool.query(
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+       RETURNING *`,
+      [
+        deviceId,
+        measurementDate,
+        measurementTime,
+        roundValue(temperature, 2, 100), // Temperature: max 100°C
+        roundValue(moisture, 2, 100), // Moisture: max 100%
+        roundValue(ph, 2, 14), // pH: max 14
+        roundValue(phosphorus, 2, 99), // Phosphorus: max 99
+        roundValue(potassium, 2, 99), // Potassium: max 99
+        roundValue(nitrogen, 2, 99), // Nitrogen: max 99
+        location || null,
+        roundLatLng(lng, 6), // Longitude: precision 10, scale 8
+        roundLatLng(lat, 6), // Latitude: precision 10, scale 8
+        false, // is_epoch
+        false  // is_uptime
+      ]
+    );
+
+    console.log('✅ Single measurement point saved:', { measurementId: rows[0].measurementid });
+
+    res.status(201).json({
+      message: 'Measurement point saved successfully',
+      measurement: rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error saving single measurement point:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -328,6 +468,52 @@ router.post('/', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Measurement saved', measurement: rows[0] });
   } catch (err) {
     console.error('Error saving measurement:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Update area with final measurements data
+router.put('/update-area/:areaId', authMiddleware, async (req, res) => {
+  try {
+    const { areaId } = req.params;
+    const { measurements } = req.body;
+
+    if (!measurements || !Array.isArray(measurements) || measurements.length === 0) {
+      return res.status(400).json({ message: 'Measurements array is required' });
+    }
+
+    // Calculate averages from measurements
+    const totalMeasurements = measurements.length;
+    const temperature_avg = measurements.reduce((sum, m) => sum + (m.temperature || 0), 0) / totalMeasurements;
+    const moisture_avg = measurements.reduce((sum, m) => sum + (m.moisture || 0), 0) / totalMeasurements;
+    const ph_avg = measurements.reduce((sum, m) => sum + (m.ph || 0), 0) / totalMeasurements;
+    const phosphorus_avg = measurements.reduce((sum, m) => sum + (m.phosphorus || 0), 0) / totalMeasurements;
+    const potassium_avg = measurements.reduce((sum, m) => sum + (m.potassium || 0), 0) / totalMeasurements;
+    const nitrogen_avg = measurements.reduce((sum, m) => sum + (m.nitrogen || 0), 0) / totalMeasurements;
+
+    // Update area with calculated averages
+    const { rows } = await pool.query(
+      `UPDATE areas 
+       SET temperature_avg = $1, moisture_avg = $2, ph_avg = $3, phosphorus_avg = $4, 
+           potassium_avg = $5, nitrogen_avg = $6, totalmeasurement = $7
+       WHERE areasid = $8 AND userid = $9
+       RETURNING *`,
+      [temperature_avg, moisture_avg, ph_avg, phosphorus_avg, potassium_avg, nitrogen_avg, totalMeasurements, areaId, req.user.userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Area not found or access denied' });
+    }
+
+    console.log('✅ Area updated with final measurements:', { areaId, totalMeasurements });
+
+    res.json({
+      message: 'Area updated successfully',
+      area: rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error updating area:', err);
     res.status(500).json({ message: err.message });
   }
 });
