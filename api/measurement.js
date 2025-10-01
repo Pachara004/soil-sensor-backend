@@ -444,7 +444,7 @@ router.post('/', authMiddleware, async (req, res) => {
     };
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)  
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        RETURNING *`,
       [
