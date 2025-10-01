@@ -319,8 +319,8 @@ router.post('/single-point', authMiddleware, async (req, res) => {
     const measurementTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, areasid, is_epoch, is_uptime, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
        RETURNING *`,
       [
         deviceId,
@@ -335,6 +335,7 @@ router.post('/single-point', authMiddleware, async (req, res) => {
         location || null,
         roundLatLng(lng, 6), // Longitude: precision 10, scale 8
         roundLatLng(lat, 6), // Latitude: precision 10, scale 8
+        areaId || null, // Areas ID
         false, // is_epoch
         false  // is_uptime
       ]
@@ -396,15 +397,18 @@ router.post('/', authMiddleware, async (req, res) => {
     } else if (measurement_date && measurement_time) {
       finalMeasurementDate = measurement_date;
       finalMeasurementTime = measurement_time;
+    } else {
+      // Generate current date and time if not provided
+      const currentDate = new Date();
+      finalMeasurementDate = currentDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      finalMeasurementTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS
     }
 
-    if (!finalDeviceId || !finalMeasurementDate || !finalMeasurementTime) {
+    if (!finalDeviceId) {
       console.log('❌ Missing required fields:', {
-        deviceid: finalDeviceId,
-        measurement_date: finalMeasurementDate,
-        measurement_time: finalMeasurementTime
+        deviceid: finalDeviceId
       });
-      return res.status(400).json({ message: 'Device ID, measurement date, and time are required' });
+      return res.status(400).json({ message: 'Device ID is required' });
     }
 
     // Extract area size in square meters from location string
@@ -444,8 +448,8 @@ router.post('/', authMiddleware, async (req, res) => {
     };
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)  
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, areasid, is_epoch, is_uptime, created_at)  
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
        RETURNING *`,
       [
         finalDeviceId,
@@ -460,6 +464,7 @@ router.post('/', authMiddleware, async (req, res) => {
         finalLocation || null,
         roundLatLng(lng, 6), // Longitude: precision 10, scale 8
         roundLatLng(lat, 6), // Latitude: precision 10, scale 8
+        null, // Areas ID (not provided in this endpoint)
         is_epoch || false,
         is_uptime || false
       ]
@@ -523,7 +528,7 @@ router.get('/area/:areaId', authMiddleware, async (req, res) => {
   try {
     const { areaId } = req.params;
     const { rows } = await pool.query(
-      'SELECT * FROM measurement WHERE areaid = $1 ORDER BY measurement_date DESC, measurement_time DESC',
+      'SELECT * FROM measurement WHERE areasid = $1 ORDER BY measurement_date DESC, measurement_time DESC',
       [areaId]
     );
     res.json(rows);
