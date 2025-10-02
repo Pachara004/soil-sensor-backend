@@ -9,14 +9,12 @@ const { sendEmail } = require('../utils/email');
 router.post('/register', async (req, res) => {
   const { email, username, name, phoneNumber, type, firebaseUid, firebase_uid } = req.body;
   try {
-    console.log('Register request body:', req.body);
 
     // รับ firebaseUid จากทั้ง camelCase และ snake_case
     const uid = firebaseUid || firebase_uid;
 
     // ตรวจสอบว่ามี firebaseUid หรือไม่
     if (!uid) {
-      console.log('Missing firebaseUid in request');
       return res.status(400).json({ message: 'Firebase UID is required' });
     }
 
@@ -36,7 +34,6 @@ router.post('/register', async (req, res) => {
       [username, email, phoneNumber || null, type || 'user', uid]
     );
 
-    console.log('User created successfully:', result.rows[0]);
 
     // ส่งอีเมลยืนยัน
     const siteName = process.env.SITE_NAME || 'Soil Sensor';
@@ -111,20 +108,23 @@ router.post('/google-login', async (req, res) => {
     // Fallback: find by email
     if (!user && email) {
       const byEmail = await pool.query(
-        'SELECT userid, user_name, user_email, role FROM users WHERE user_email = $1 LIMIT 1',
+        'SELECT userid, user_name, user_email, role, firebase_uid FROM users WHERE user_email = $1 LIMIT 1',
         [email]
       );
       user = byEmail.rows[0] || null;
 
-      // Update firebase_uid if found by email
+      // Update firebase_uid if found by email (link Google account to existing user)
       if (user) {
         try {
           await pool.query(
             'UPDATE users SET firebase_uid = $1, updated_at = NOW() WHERE user_email = $2',
             [firebaseUid, email]
           );
+          // Update user object with new firebase_uid
+          user.firebase_uid = firebaseUid;
         } catch (e) {
-          // firebase_uid column may not exist
+          // firebase_uid column may not exist, but user can still login
+          console.warn('Could not update firebase_uid:', e.message);
         }
       }
     }
@@ -132,6 +132,7 @@ router.post('/google-login', async (req, res) => {
     // Create new user if not found
     if (!user) {
       const username = email ? email.split('@')[0] : `user_${firebaseUid.slice(0, 8)}`;
+
       try {
         const insert = await pool.query(
           `INSERT INTO users (user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at)
@@ -141,13 +142,38 @@ router.post('/google-login', async (req, res) => {
         );
         user = insert.rows[0];
       } catch (e) {
-        const insert2 = await pool.query(
-          `INSERT INTO users (user_name, user_email, user_phone, role, created_at, updated_at)
-           VALUES ($1, $2, NULL, 'user', NOW(), NOW())
-           RETURNING userid, user_name, user_email, user_phone, role, created_at, updated_at`,
-          [username, email]
-        );
-        user = insert2.rows[0];
+        // Check if it's a duplicate email error
+        if (e.code === '23505' && e.constraint && e.constraint.includes('email')) {
+          return res.status(409).json({
+            message: 'Email already exists in system. Please use a different email or login with existing account.',
+            error: 'EMAIL_EXISTS'
+          });
+        }
+
+        // If firebase_uid column doesn't exist, try without it
+        try {
+          const insert2 = await pool.query(
+            `INSERT INTO users (user_name, user_email, user_phone, role, created_at, updated_at)
+             VALUES ($1, $2, NULL, 'user', NOW(), NOW())
+             RETURNING userid, user_name, user_email, user_phone, role, created_at, updated_at`,
+            [username, email]
+          );
+          user = insert2.rows[0];
+        } catch (e2) {
+          // Check if it's a duplicate email error
+          if (e2.code === '23505' && e2.constraint && e2.constraint.includes('email')) {
+            return res.status(409).json({
+              message: 'Email already exists in system. Please use a different email or login with existing account.',
+              error: 'EMAIL_EXISTS'
+            });
+          }
+
+          console.error('Failed to create user:', e2);
+          return res.status(500).json({
+            message: 'Failed to create user account',
+            error: 'USER_CREATION_FAILED'
+          });
+        }
       }
     }
 
@@ -193,24 +219,15 @@ router.post('/send-otp', async (req, res) => {
   const body = `รหัส OTP ของคุณคือ: ${otp}\n\nใช้ได้ภายใน 5 นาที\nจากระบบ ${siteName}\n\nหมายเลขอ้างอิง: ${ref}`;
   await sendEmail(email, subject, body);
 
-  console.log('📧 OTP sent:', { email, otp, ref, expiresAt: new Date(Date.now() + ttlMs) });
   res.json({ message: 'OTP sent', ref });
 });
 
 router.put('/reset-password', async (req, res) => {
   try {
-    console.log('🔐 Reset password request body:', req.body);
     const { email, otp, newPassword, referenceNumber } = req.body;
 
-    console.log('🔍 Parsed fields:', {
-      email: !!email,
-      otp: !!otp,
-      newPassword: !!newPassword,
-      referenceNumber: !!referenceNumber
-    });
 
     if (!email || !otp || !newPassword) {
-      console.log('❌ Missing required fields:', { email: !!email, otp: !!otp, newPassword: !!newPassword });
       return res.status(400).json({ message: 'Email, OTP, and new password are required' });
     }
 
@@ -218,16 +235,6 @@ router.put('/reset-password', async (req, res) => {
     const store = global.otpStore || {};
     const entry = store[email];
 
-    console.log('🔍 OTP Store check:', {
-      email,
-      hasEntry: !!entry,
-      storeKeys: Object.keys(store),
-      entryExpires: entry ? new Date(entry.expiresAt) : null,
-      entryCode: entry ? entry.code : null,
-      entryRef: entry ? entry.ref : null,
-      currentTime: new Date(),
-      isExpired: entry ? Date.now() > entry.expiresAt : true
-    });
 
     if (!entry) {
       return res.status(400).json({ message: 'OTP not found or expired' });
@@ -238,20 +245,13 @@ router.put('/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'OTP expired' });
     }
 
-    console.log('🔍 OTP Comparison:', {
-      receivedOtp: otp,
-      storedOtp: entry.code,
-      otpMatch: entry.code === otp
-    });
 
     if (entry.code !== otp) {
-      console.log('❌ OTP mismatch:', { received: otp, stored: entry.code });
       return res.status(400).json({ message: 'Invalid OTP' });
     }
 
     // ตรวจสอบว่า OTP ถูก verify แล้วหรือไม่
     if (!entry.verified) {
-      console.log('❌ OTP not verified yet');
       return res.status(400).json({ message: 'OTP must be verified first' });
     }
 
@@ -273,34 +273,23 @@ router.put('/reset-password', async (req, res) => {
     // อัปเดตรหัสผ่านใน Firebase Auth (ถ้ามี firebase_uid)
     if (user.firebase_uid) {
       try {
-        console.log('🔥 Updating Firebase Auth password for UID:', user.firebase_uid);
         await admin.auth().updateUser(user.firebase_uid, {
           password: newPassword
         });
-        console.log('✅ Firebase Auth password updated successfully');
       } catch (firebaseError) {
-        console.error('❌ Firebase Auth update error:', firebaseError);
         // ไม่ return error เพราะ database update สำเร็จแล้ว
         // แค่ log error และดำเนินการต่อ
       }
     } else {
-      console.log('ℹ️ No Firebase UID found, skipping Firebase Auth update');
     }
 
     // ลบ OTP หลังใช้แล้ว
     if (entry.timeout) clearTimeout(entry.timeout);
     delete global.otpStore[email];
 
-    console.log('✅ Password reset successful for:', email);
     res.json({ message: 'Password reset successfully' });
   } catch (err) {
-    console.error('❌ Reset password error:', err);
-    console.error('❌ Error details:', {
-      message: err.message,
-      stack: err.stack,
-      code: err.code,
-      detail: err.detail
-    });
+    console.error('Reset password error:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -323,7 +312,6 @@ router.post('/verify-otp', async (req, res) => {
   // เพิ่ม flag เพื่อระบุว่า OTP ถูก verify แล้ว
   entry.verified = true;
 
-  console.log('✅ OTP verified for:', email);
   res.json({ message: 'OTP verified' });
 });
 
@@ -430,7 +418,6 @@ router.get('/user/me', require('../middleware/auth'), async (req, res) => {
 // Delete user account (both Firebase Auth and PostgreSQL)
 router.delete('/delete-account', require('../middleware/auth'), async (req, res) => {
   try {
-    console.log('🗑️ Delete account request for user:', req.user.userid);
 
     // Get user data first
     const { rows } = await pool.query(
@@ -443,12 +430,6 @@ router.delete('/delete-account', require('../middleware/auth'), async (req, res)
     }
 
     const user = rows[0];
-    console.log('👤 User to delete:', {
-      userid: user.userid,
-      user_name: user.user_name,
-      user_email: user.user_email,
-      firebase_uid: user.firebase_uid
-    });
 
     // Start transaction to ensure data consistency
     const client = await pool.connect();
@@ -457,53 +438,40 @@ router.delete('/delete-account', require('../middleware/auth'), async (req, res)
       await client.query('BEGIN');
 
       // 1. Delete related data first (to avoid foreign key constraints)
-      console.log('🗑️ Deleting related data...');
 
       // Delete areas_at relationships
       await client.query('DELETE FROM areas_at WHERE areasid IN (SELECT areasid FROM areas WHERE userid = $1)', [user.userid]);
-      console.log('✅ Deleted areas_at relationships');
 
       // Delete areas
       await client.query('DELETE FROM areas WHERE userid = $1', [user.userid]);
-      console.log('✅ Deleted areas');
 
       // Delete measurements
       await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [user.userid]);
-      console.log('✅ Deleted measurements');
 
       // Delete devices
       await client.query('DELETE FROM device WHERE userid = $1', [user.userid]);
-      console.log('✅ Deleted devices');
 
       // Delete images first (they reference reports)
       await client.query('DELETE FROM images WHERE reportid IN (SELECT reportid FROM reports WHERE userid = $1)', [user.userid]);
-      console.log('✅ Deleted images');
 
       // Delete reports
       await client.query('DELETE FROM reports WHERE userid = $1', [user.userid]);
-      console.log('✅ Deleted reports');
 
       // 2. Delete user from PostgreSQL
       await client.query('DELETE FROM users WHERE userid = $1', [user.userid]);
-      console.log('✅ Deleted user from PostgreSQL');
 
       // 3. Delete user from Firebase Auth (if firebase_uid exists)
       if (user.firebase_uid) {
         try {
-          console.log('🔥 Deleting user from Firebase Auth:', user.firebase_uid);
           await admin.auth().deleteUser(user.firebase_uid);
-          console.log('✅ Deleted user from Firebase Auth');
         } catch (firebaseError) {
-          console.error('❌ Firebase Auth delete error:', firebaseError);
           // Continue with PostgreSQL deletion even if Firebase fails
           // This ensures data consistency
         }
       } else {
-        console.log('ℹ️ No Firebase UID found, skipping Firebase Auth deletion');
       }
 
       await client.query('COMMIT');
-      console.log('✅ Transaction committed successfully');
 
       res.json({
         message: 'Account deleted successfully',
@@ -517,14 +485,13 @@ router.delete('/delete-account', require('../middleware/auth'), async (req, res)
 
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('❌ Transaction rolled back:', error);
       throw error;
     } finally {
       client.release();
     }
 
   } catch (err) {
-    console.error('❌ Delete account error:', err);
+    console.error('Delete account error:', err);
     res.status(500).json({
       message: 'Failed to delete account',
       error: err.message
@@ -541,14 +508,14 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
     }
 
     const targetUserid = parseInt(req.params.userid);
-    if (!targetUserid || targetUserid === req.user.userid) {
-      return res.status(400).json({ message: 'Invalid user ID or cannot delete self' });
+    if (!targetUserid) {
+      return res.status(400).json({ message: 'Invalid user ID' });
     }
 
-    console.log('🗑️ Admin delete user request:', {
-      adminUserid: req.user.userid,
-      targetUserid: targetUserid
-    });
+    if (targetUserid === req.user.userid) {
+      return res.status(400).json({ message: 'Cannot delete yourself' });
+    }
+
 
     // Get target user data
     const { rows } = await pool.query(
@@ -561,7 +528,6 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
     }
 
     const targetUser = rows[0];
-    console.log('👤 Target user to delete:', targetUser);
 
     // Start transaction
     const client = await pool.connect();
@@ -570,49 +536,38 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
       await client.query('BEGIN');
 
       // Delete related data
-      console.log('🗑️ Deleting related data for user:', targetUserid);
 
       // Delete areas_at relationships
       await client.query('DELETE FROM areas_at WHERE areasid IN (SELECT areasid FROM areas WHERE userid = $1)', [targetUserid]);
-      console.log('✅ Deleted areas_at relationships');
 
       // Delete areas
       await client.query('DELETE FROM areas WHERE userid = $1', [targetUserid]);
-      console.log('✅ Deleted areas');
 
       // Delete measurements
       await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [targetUserid]);
-      console.log('✅ Deleted measurements');
 
       // Delete devices
       await client.query('DELETE FROM device WHERE userid = $1', [targetUserid]);
-      console.log('✅ Deleted devices');
 
       // Delete images first (they reference reports)
       await client.query('DELETE FROM images WHERE reportid IN (SELECT reportid FROM reports WHERE userid = $1)', [targetUserid]);
-      console.log('✅ Deleted images');
 
       // Delete reports
       await client.query('DELETE FROM reports WHERE userid = $1', [targetUserid]);
-      console.log('✅ Deleted reports');
 
       // Delete user from PostgreSQL
       await client.query('DELETE FROM users WHERE userid = $1', [targetUserid]);
-      console.log('✅ Deleted user from PostgreSQL');
 
       // Delete user from Firebase Auth
       if (targetUser.firebase_uid) {
         try {
           console.log('🔥 Deleting user from Firebase Auth:', targetUser.firebase_uid);
           await admin.auth().deleteUser(targetUser.firebase_uid);
-          console.log('✅ Deleted user from Firebase Auth');
         } catch (firebaseError) {
-          console.error('❌ Firebase Auth delete error:', firebaseError);
         }
       }
 
       await client.query('COMMIT');
-      console.log('✅ Admin delete transaction committed');
 
       res.json({
         message: 'User deleted successfully by admin',
@@ -625,18 +580,65 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
 
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('❌ Admin delete transaction rolled back:', error);
       throw error;
     } finally {
       client.release();
     }
 
   } catch (err) {
-    console.error('❌ Admin delete user error:', err);
+    console.error('Admin delete user error:', err);
     res.status(500).json({
       message: 'Failed to delete user',
       error: err.message
     });
+  }
+});
+
+// Debug endpoint to check token
+router.post('/debug-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ message: 'Token is required' });
+    }
+
+    let result = { token: token.substring(0, 50) + '...' };
+
+    // Try Firebase verification
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      result.firebase = {
+        success: true,
+        uid: decoded.uid,
+        email: decoded.email,
+        exp: new Date(decoded.exp * 1000).toISOString()
+      };
+    } catch (firebaseError) {
+      result.firebase = {
+        success: false,
+        error: firebaseError.message
+      };
+    }
+
+    // Try JWT verification
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+      result.jwt = {
+        success: true,
+        userid: decoded.userid,
+        email: decoded.email,
+        exp: new Date(decoded.exp * 1000).toISOString()
+      };
+    } catch (jwtError) {
+      result.jwt = {
+        success: false,
+        error: jwtError.message
+      };
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

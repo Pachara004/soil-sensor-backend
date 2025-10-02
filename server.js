@@ -34,9 +34,7 @@ if (hasFirebaseEnv) {
         process.env.FIREBASE_PRIVATE_KEY_BASE64,
         'base64'
       ).toString('utf8');
-      console.log('🔐 Firebase private key decoded from base64');
     } catch (e) {
-      console.warn('⚠️ Invalid FIREBASE_PRIVATE_KEY_BASE64:', e.message);
     }
   }
 
@@ -54,16 +52,12 @@ if (hasFirebaseEnv) {
       });
 
       db = admin.database();
-      console.log('✅ Firebase initialized successfully');
     } else {
-      console.warn('⚠️ Firebase private key not found');
     }
   } catch (err) {
-    console.error('❌ Firebase initialization failed:', err.message);
-    console.log('➡️ Continuing without Firebase (some features disabled)…');
+    console.error('Firebase initialization failed:', err.message);
   }
 } else {
-  console.log('⚠️ Firebase env not set; skipping Firebase initialization');
 }
 
 /* --------------------
@@ -118,14 +112,12 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     .verify()
     .then(() => {
       emailReady = true;
-      console.log('✅ Nodemailer (SMTP) ready');
     })
     .catch((err) => {
       emailReady = false;
-      console.error('❌ Nodemailer verify failed:', err.message);
+      console.error('Nodemailer verify failed:', err.message);
     });
 } else {
-  console.log('⚠️ Email credentials not configured (EMAIL_USER / EMAIL_PASS)');
 }
 
 /* --------------------
@@ -149,7 +141,6 @@ app.get('/health', (req, res) => {
  * Socket.IO handlers
  * -------------------- */
 io.on('connection', (socket) => {
-  console.log('🔌 Client connected:', socket.id);
 
   socket.on('join-device', (deviceId) => {
     if (!deviceId) {
@@ -158,7 +149,6 @@ io.on('connection', (socket) => {
     }
 
     socket.join(deviceId);
-    console.log(`➡️ Socket ${socket.id} joined device room: ${deviceId}`);
 
     if (!db) {
       socket.emit('error', { message: 'Firebase not available' });
@@ -171,7 +161,6 @@ io.on('connection', (socket) => {
       const payload = snapshot.val();
       if (payload) {
         socket.emit('live-update', payload);
-        // console.log(`📡 Live update emitted for ${deviceId}`);
       }
     };
 
@@ -190,12 +179,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      console.log(`💾 save-measurement for device: ${deviceId}`);
 
       // โปรเจ็กต์นี้ปิด MongoDB อยู่ — ทำเฉพาะเคลียร์ live ใน Firebase
       if (db) {
         await db.ref(`live/${deviceId}`).remove();
-        console.log(`🧹 Cleared live data for ${deviceId}`);
       }
 
       socket.emit('measurement-saved', {
@@ -210,7 +197,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('🔌 Client disconnected:', socket.id);
     if (socket.liveRef && socket.onLiveUpdate) {
       socket.liveRef.off('value', socket.onLiveUpdate);
     }
@@ -277,11 +263,9 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, (err) => {
   if (err) {
-    console.error('❌ Failed to start server:', err);
+    console.error('Failed to start server:', err);
     process.exit(1);
   }
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
 });
 
 /* --------------------
@@ -289,26 +273,21 @@ server.listen(PORT, (err) => {
  * -------------------- */
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use`);
-    console.log('💡 Use a different port or stop the process using this port');
+    console.error(`Port ${PORT} is already in use`);
     process.exit(1);
   } else {
-    console.error('❌ Server error:', err);
+    console.error('Server error:', err);
   }
 });
 
 process.on('SIGTERM', () => {
-  console.log('📴 Shutting down gracefully (SIGTERM)…');
   server.close(() => {
-    console.log('✅ Server closed');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
-  console.log('\n📴 Shutting down gracefully (SIGINT)…');
   server.close(() => {
-    console.log('✅ Server closed');
     process.exit(0);
   });
 });

@@ -117,7 +117,6 @@ router.get('/:deviceId', authMiddleware, async (req, res) => {
 // Create area immediately when user confirms area selection
 router.post('/create-area-immediately', authMiddleware, async (req, res) => {
   try {
-    console.log('🏞️ Create area immediately request body:', req.body);
 
     const {
       area_name,
@@ -140,7 +139,6 @@ router.post('/create-area-immediately', authMiddleware, async (req, res) => {
 
     const areaId = areaRows[0].areasid;
 
-    console.log('✅ Area created immediately:', { areaId, area_name });
 
     res.json({
       message: 'Area created successfully',
@@ -157,7 +155,6 @@ router.post('/create-area-immediately', authMiddleware, async (req, res) => {
 // Create new area (when user confirms measurement location)
 router.post('/create-area', authMiddleware, async (req, res) => {
   try {
-    console.log('🏞️ Create area request body:', req.body);
 
     const {
       area_name,
@@ -173,7 +170,6 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
     // If no measurements provided, create area with default values
     if (!measurements || !Array.isArray(measurements) || measurements.length === 0) {
-      console.log('📝 Creating area without measurements (measurements will be added later)');
 
       const { rows: areaRows } = await pool.query(
         `INSERT INTO areas (area_name, temperature_avg, moisture_avg, ph_avg, phosphorus_avg, potassium_avg, nitrogen_avg, totalmeasurement, userid, deviceid, created_at)
@@ -184,7 +180,6 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
       const areaId = areaRows[0].areasid;
 
-      console.log('✅ Area created without measurements:', { areaId, area_name });
 
       return res.json({
         message: 'Area created successfully',
@@ -280,7 +275,6 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 // Save single measurement point
 router.post('/single-point', authMiddleware, async (req, res) => {
   try {
-    console.log('📊 Save single measurement point request body:', req.body);
 
     const {
       deviceId,
@@ -341,7 +335,6 @@ router.post('/single-point', authMiddleware, async (req, res) => {
       ]
     );
 
-    console.log('✅ Single measurement point saved:', { measurementId: rows[0].measurementid });
 
     res.status(201).json({
       message: 'Measurement point saved successfully',
@@ -357,7 +350,6 @@ router.post('/single-point', authMiddleware, async (req, res) => {
 // Create new measurement (individual measurement)
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    console.log('📊 Measurement request body:', req.body);
 
     const {
       deviceid,
@@ -405,9 +397,6 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     if (!finalDeviceId) {
-      console.log('❌ Missing required fields:', {
-        deviceid: finalDeviceId
-      });
       return res.status(400).json({ message: 'Device ID is required' });
     }
 
@@ -510,7 +499,6 @@ router.put('/update-area/:areaId', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Area not found or access denied' });
     }
 
-    console.log('✅ Area updated with final measurements:', { areaId, totalMeasurements });
 
     res.json({
       message: 'Area updated successfully',

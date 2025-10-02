@@ -19,14 +19,20 @@ const authMiddleware = async (req, res, next) => {
       firebaseUid = decoded.uid;
       email = decoded.email || null;
       name = decoded.name || (email ? email.split('@')[0] : 'user');
+      console.log('✅ Firebase token verified successfully:', { uid: firebaseUid, email });
     } catch (firebaseError) {
+      console.warn('⚠️ Firebase token verification failed:', firebaseError.message);
       try {
         // If Firebase verification fails, try JWT verification
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
         firebaseUid = null; // JWT doesn't have Firebase UID
         email = decoded.email || null;
         name = decoded.user_name || decoded.username || (email ? email.split('@')[0] : 'user');
+        console.log('✅ JWT token verified successfully:', { userid: decoded.userid, email });
       } catch (jwtError) {
+        console.error('JWT verification failed:', jwtError.message);
+        console.error('Token:', token.substring(0, 50) + '...');
+        console.error('Secret used:', process.env.JWT_SECRET || 'your-secret-key');
         return res.status(401).json({ message: 'Invalid token' });
       }
     }
@@ -110,6 +116,12 @@ const authMiddleware = async (req, res, next) => {
       firebase_uid: firebaseUid,
       name: userRow.user_name || name,
     };
+
+    console.log('✅ User authenticated:', {
+      userid: req.user.userid,
+      email: req.user.email,
+      role: req.user.role
+    });
 
     return next();
   } catch (err) {
