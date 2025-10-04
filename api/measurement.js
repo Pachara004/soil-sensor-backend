@@ -3,6 +3,67 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const authMiddleware = require('../middleware/auth');
 
+// Helper function to calculate and update area averages
+async function calculateAreaAverages(areaId) {
+  try {
+    console.log(`🔄 Calculating averages for area ${areaId}...`);
+
+    // Get all measurements for this area
+    const { rows: measurements } = await pool.query(
+      'SELECT temperature, moisture, ph, phosphorus, potassium, nitrogen FROM measurement WHERE areasid = $1',
+      [areaId]
+    );
+
+    if (measurements.length === 0) {
+      console.log(`⚠️ No measurements found for area ${areaId}`);
+      return;
+    }
+
+    // Calculate averages (convert string to number)
+    const totalMeasurements = measurements.length;
+    const temperature_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.temperature) || 0), 0) / totalMeasurements;
+    const moisture_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.moisture) || 0), 0) / totalMeasurements;
+    const ph_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.ph) || 0), 0) / totalMeasurements;
+    const phosphorus_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.phosphorus) || 0), 0) / totalMeasurements;
+    const potassium_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.potassium) || 0), 0) / totalMeasurements;
+    const nitrogen_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.nitrogen) || 0), 0) / totalMeasurements;
+
+    // Round values to 2 decimal places
+    const roundValue = (value, decimals) => {
+      return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    };
+
+    // Update area with calculated averages
+    await pool.query(`
+      UPDATE areas 
+      SET temperature_avg = $1, moisture_avg = $2, ph_avg = $3, phosphorus_avg = $4, 
+          potassium_avg = $5, nitrogen_avg = $6, totalmeasurement = $7, textupdated = NOW()
+      WHERE areasid = $8
+    `, [
+      roundValue(temperature_avg, 2),
+      roundValue(moisture_avg, 2),
+      roundValue(ph_avg, 2),
+      roundValue(phosphorus_avg, 2),
+      roundValue(potassium_avg, 2),
+      roundValue(nitrogen_avg, 2),
+      totalMeasurements,
+      areaId
+    ]);
+
+    console.log(`✅ Updated area ${areaId} with averages:`);
+    console.log(`   Temperature: ${roundValue(temperature_avg, 2)}°C`);
+    console.log(`   Moisture: ${roundValue(moisture_avg, 2)}%`);
+    console.log(`   pH: ${roundValue(ph_avg, 2)}`);
+    console.log(`   Phosphorus: ${roundValue(phosphorus_avg, 2)} ppm`);
+    console.log(`   Potassium: ${roundValue(potassium_avg, 2)} ppm`);
+    console.log(`   Nitrogen: ${roundValue(nitrogen_avg, 2)} ppm`);
+    console.log(`   Total Measurements: ${totalMeasurements}`);
+
+  } catch (err) {
+    console.error(`❌ Error calculating averages for area ${areaId}:`, err.message);
+  }
+}
+
 // Get areas (for Angular compatibility) - MUST be before /:deviceId route
 router.get('/areas', authMiddleware, async (req, res) => {
   try {
@@ -66,7 +127,7 @@ router.get('/areas/with-measurements', authMiddleware, async (req, res) => {
             'moisture', m.moisture,
             'ph', m.ph,
             'phosphorus', m.phosphorus,
-            'potassium_avg', m.potassium_avg,
+            'potassium', m.potassium,
             'nitrogen', m.nitrogen,
             'lng', m.lng,
             'lat', m.lat,
@@ -93,7 +154,7 @@ router.get('/areas/with-measurements', authMiddleware, async (req, res) => {
             'moisture', m.moisture,
             'ph', m.ph,
             'phosphorus', m.phosphorus,
-            'potassium_avg', m.potassium_avg,
+            'potassium', m.potassium,
             'nitrogen', m.nitrogen,
             'lng', m.lng,
             'lat', m.lat,
@@ -141,7 +202,6 @@ router.post('/create-area-immediately', authMiddleware, async (req, res) => {
     const {
       area_name,
       deviceId,
-      area_size,
       coordinates
     } = req.body;
 
@@ -180,7 +240,6 @@ router.post('/create-area', authMiddleware, async (req, res) => {
       area_name,
       measurements, // Array of measurements for this area (optional)
       deviceId,
-      area_size,
       coordinates
     } = req.body;
 
@@ -200,6 +259,9 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
       const areaId = areaRows[0].areasid;
 
+
+      // Calculate and update area averages after creating area
+      await calculateAreaAverages(areaId);
 
       return res.json({
         message: 'Area created successfully',
@@ -248,7 +310,7 @@ router.post('/create-area', authMiddleware, async (req, res) => {
       const finalLocation = areaSize !== null ? areaSize.toString() : "0.00";
 
       const { rows: measurementRows } = await pool.query(
-        `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
+        `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
          RETURNING *`,
         [
@@ -262,8 +324,8 @@ router.post('/create-area', authMiddleware, async (req, res) => {
           measurement.potassium,
           measurement.nitrogen,
           measurement.location || finalLocation,
-          measurement.lng,
-          measurement.lat,
+          roundLatLng(measurement.lng, 8), // High precision longitude
+          roundLatLng(measurement.lat, 8), // High precision latitude
           measurement.is_epoch || false,
           measurement.is_uptime || false
         ]
@@ -279,6 +341,9 @@ router.post('/create-area', authMiddleware, async (req, res) => {
         [areaId, measurementId]
       );
     }
+
+    // Calculate and update area averages after creating area with measurements
+    await calculateAreaAverages(areaId);
 
     res.status(201).json({
       message: 'Area created successfully',
@@ -320,11 +385,10 @@ router.post('/single-point', authMiddleware, async (req, res) => {
       return Math.min(Math.max(rounded, 0), max);
     };
 
-    const roundLatLng = (value, decimals) => {
-      // For precision 10, scale 8: max value is 99.99999999
-      const maxValue = 99.99999999;
+    const roundLatLng = (value, decimals = 8) => {
+      // Convert to string with high precision for accurate map positioning
       const rounded = Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
-      return Math.min(Math.max(rounded, -maxValue), maxValue);
+      return rounded.toFixed(decimals);
     };
 
     // Generate current date and time
@@ -333,7 +397,7 @@ router.post('/single-point', authMiddleware, async (req, res) => {
     const measurementTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        RETURNING *`,
       [
@@ -346,14 +410,19 @@ router.post('/single-point', authMiddleware, async (req, res) => {
         roundValue(phosphorus, 2, 99), // Phosphorus: max 99
         roundValue(potassium, 2, 99), // Potassium: max 99
         roundValue(nitrogen, 2, 99), // Nitrogen: max 99
-        roundLatLng(lng, 6), // Longitude: precision 10, scale 8
-        roundLatLng(lat, 6), // Latitude: precision 10, scale 8
+        roundLatLng(lng, 8), // Longitude: high precision for accurate map positioning
+        roundLatLng(lat, 8), // Latitude: high precision for accurate map positioning
         areaId || null, // Areas ID
         false, // is_epoch
         false  // is_uptime
       ]
     );
 
+
+    // Calculate and update area averages if areaId is provided
+    if (areaId) {
+      await calculateAreaAverages(areaId);
+    }
 
     res.status(201).json({
       message: 'Measurement point saved successfully',
@@ -447,17 +516,16 @@ router.post('/', authMiddleware, async (req, res) => {
       return Math.min(rounded, max); // Limit to maximum value to prevent overflow
     };
 
-    // Special function for lat/lng with precision 10, scale 8 (max 2 integer digits)
-    const roundLatLng = (value, decimals = 6) => {
+    // Special function for lat/lng with high precision for accurate map positioning
+    const roundLatLng = (value, decimals = 8) => {
       if (value === null || value === undefined) return null;
-      // For precision 10, scale 8: max value is 99.99999999
-      const maxValue = 99.99999999;
+      // Convert to string with high precision for accurate map positioning
       const rounded = Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
-      return Math.min(Math.max(rounded, -maxValue), maxValue);
+      return rounded.toFixed(decimals);
     };
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium_avg, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)  
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)  
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        RETURNING *`,
       [
@@ -470,17 +538,183 @@ router.post('/', authMiddleware, async (req, res) => {
         roundValue(phosphorus, 2, 99), // Phosphorus: max 99
         roundValue(potassium, 2, 99), // Potassium: max 99
         roundValue(nitrogen, 2, 99), // Nitrogen: max 99
-        roundLatLng(lng, 6), // Longitude: precision 10, scale 8
-        roundLatLng(lat, 6), // Latitude: precision 10, scale 8
+        roundLatLng(lng, 8), // Longitude: high precision for accurate map positioning
+        roundLatLng(lat, 8), // Latitude: high precision for accurate map positioning
         areaId || null, // Areas ID from request body
         is_epoch || false,
         is_uptime || false
       ]
     );
 
+    // Calculate and update area averages if areaId is provided
+    if (areaId) {
+      await calculateAreaAverages(areaId);
+    }
+
     res.status(201).json({ message: 'Measurement saved', measurement: rows[0] });
   } catch (err) {
     console.error('Error saving measurement:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Calculate and update all area averages
+router.put('/calculate-all-area-averages', authMiddleware, async (req, res) => {
+  try {
+    // Get all areas for this user
+    const { rows: areas } = await pool.query(
+      'SELECT areasid FROM areas WHERE userid = $1',
+      [req.user.userid]
+    );
+
+    if (areas.length === 0) {
+      return res.status(404).json({ message: 'No areas found for this user' });
+    }
+
+    const results = [];
+    const roundValue = (value, decimals) => {
+      return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    };
+
+    // Calculate averages for each area
+    for (const area of areas) {
+      const { rows: measurements } = await pool.query(
+        'SELECT temperature, moisture, ph, phosphorus, potassium, nitrogen FROM measurement WHERE areasid = $1',
+        [area.areasid]
+      );
+
+      console.log(`🔍 Area ${area.areasid}: Found ${measurements.length} measurements`);
+
+      if (measurements.length > 0) {
+        const totalMeasurements = measurements.length;
+        const temperature_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.temperature) || 0), 0) / totalMeasurements;
+        const moisture_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.moisture) || 0), 0) / totalMeasurements;
+        const ph_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.ph) || 0), 0) / totalMeasurements;
+        const phosphorus_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.phosphorus) || 0), 0) / totalMeasurements;
+        const potassium_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.potassium) || 0), 0) / totalMeasurements;
+        const nitrogen_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.nitrogen) || 0), 0) / totalMeasurements;
+
+        // Update area with calculated averages
+        const { rows: updatedArea } = await pool.query(
+          `UPDATE areas 
+           SET temperature_avg = $1, moisture_avg = $2, ph_avg = $3, phosphorus_avg = $4, 
+               potassium_avg = $5, nitrogen_avg = $6, totalmeasurement = $7, textupdated = NOW()
+           WHERE areasid = $8 AND userid = $9
+           RETURNING *`,
+          [
+            roundValue(temperature_avg, 2),
+            roundValue(moisture_avg, 2),
+            roundValue(ph_avg, 2),
+            roundValue(phosphorus_avg, 2),
+            roundValue(potassium_avg, 2),
+            roundValue(nitrogen_avg, 2),
+            totalMeasurements,
+            area.areasid,
+            req.user.userid
+          ]
+        );
+
+        if (updatedArea.length > 0) {
+          results.push({
+            areasid: area.areasid,
+            area_name: updatedArea[0].area_name,
+            averages: {
+              temperature_avg: roundValue(temperature_avg, 2),
+              moisture_avg: roundValue(moisture_avg, 2),
+              ph_avg: roundValue(ph_avg, 2),
+              phosphorus_avg: roundValue(phosphorus_avg, 2),
+              potassium_avg: roundValue(potassium_avg, 2),
+              nitrogen_avg: roundValue(nitrogen_avg, 2),
+              totalMeasurements: totalMeasurements
+            }
+          });
+        }
+      }
+    }
+
+    res.json({
+      message: 'All area averages calculated and updated successfully',
+      updatedAreas: results.length,
+      results: results
+    });
+
+  } catch (err) {
+    console.error('Error calculating all area averages:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Calculate and update area averages from existing measurements
+router.put('/calculate-area-averages/:areaId', authMiddleware, async (req, res) => {
+  try {
+    const { areaId } = req.params;
+
+    // Get all measurements for this area
+    const { rows: measurements } = await pool.query(
+      'SELECT temperature, moisture, ph, phosphorus, potassium, nitrogen FROM measurement WHERE areasid = $1',
+      [areaId]
+    );
+
+    console.log(`🔍 Area ${areaId}: Found ${measurements.length} measurements`);
+
+    if (measurements.length === 0) {
+      return res.status(404).json({ message: 'No measurements found for this area' });
+    }
+
+    // Calculate averages from existing measurements (convert string to number)
+    const totalMeasurements = measurements.length;
+    const temperature_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.temperature) || 0), 0) / totalMeasurements;
+    const moisture_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.moisture) || 0), 0) / totalMeasurements;
+    const ph_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.ph) || 0), 0) / totalMeasurements;
+    const phosphorus_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.phosphorus) || 0), 0) / totalMeasurements;
+    const potassium_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.potassium) || 0), 0) / totalMeasurements;
+    const nitrogen_avg = measurements.reduce((sum, m) => sum + (parseFloat(m.nitrogen) || 0), 0) / totalMeasurements;
+
+    // Round values to 2 decimal places
+    const roundValue = (value, decimals) => {
+      return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    };
+
+    // Update area with calculated averages
+    const { rows } = await pool.query(
+      `UPDATE areas 
+       SET temperature_avg = $1, moisture_avg = $2, ph_avg = $3, phosphorus_avg = $4, 
+           potassium_avg = $5, nitrogen_avg = $6, totalmeasurement = $7, textupdated = NOW()
+       WHERE areasid = $8 AND userid = $9
+       RETURNING *`,
+      [
+        roundValue(temperature_avg, 2),
+        roundValue(moisture_avg, 2),
+        roundValue(ph_avg, 2),
+        roundValue(phosphorus_avg, 2),
+        roundValue(potassium_avg, 2),
+        roundValue(nitrogen_avg, 2),
+        totalMeasurements,
+        areaId,
+        req.user.userid
+      ]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Area not found or access denied' });
+    }
+
+    res.json({
+      message: 'Area averages calculated and updated successfully',
+      area: rows[0],
+      calculatedAverages: {
+        temperature_avg: roundValue(temperature_avg, 2),
+        moisture_avg: roundValue(moisture_avg, 2),
+        ph_avg: roundValue(ph_avg, 2),
+        phosphorus_avg: roundValue(phosphorus_avg, 2),
+        potassium_avg: roundValue(potassium_avg, 2),
+        nitrogen_avg: roundValue(nitrogen_avg, 2),
+        totalMeasurements: totalMeasurements
+      }
+    });
+
+  } catch (err) {
+    console.error('Error calculating area averages:', err);
     res.status(500).json({ message: err.message });
   }
 });
