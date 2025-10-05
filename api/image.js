@@ -96,7 +96,6 @@ router.post('/', authMiddleware, async (req, res) => {
     try {
         const { reportid, imageUrl } = req.body;
 
-        console.log('📷 Add image request:', { reportid, imageUrl, requester: req.user.userid, role: req.user.role });
 
         if (!reportid || !imageUrl) {
             return res.status(400).json({ message: 'Report ID and image URL are required' });
@@ -128,7 +127,6 @@ router.post('/', authMiddleware, async (req, res) => {
             [reportid, imageUrl]
         );
 
-        console.log('✅ Image added successfully:', rows[0]);
         res.status(201).json({ message: 'Image added successfully', image: rows[0] });
     } catch (err) {
         console.error('❌ Error adding image:', err);
@@ -142,7 +140,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
         const { id } = req.params;
         const { imageUrl } = req.body;
 
-        console.log('📷 Update image request:', { id, imageUrl, requester: req.user.userid, role: req.user.role });
 
         if (!imageUrl) {
             return res.status(400).json({ message: 'Image URL is required' });
@@ -179,7 +176,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
             [imageUrl, id]
         );
 
-        console.log('✅ Image updated successfully:', rows[0]);
         res.json({ message: 'Image updated successfully', image: rows[0] });
     } catch (err) {
         console.error('❌ Error updating image:', err);
@@ -192,7 +188,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
 
-        console.log('🗑️ Delete image request:', { id, requester: req.user.userid, role: req.user.role });
 
         // Get current image data
         const { rows: imageRows } = await pool.query(
@@ -217,7 +212,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
         // Delete image
         await pool.query('DELETE FROM images WHERE imageid = $1', [id]);
 
-        console.log('✅ Image deleted successfully:', { imageid: id, reportid: image.reportid });
         res.json({ message: 'Image deleted successfully' });
     } catch (err) {
         console.error('❌ Error deleting image:', err);

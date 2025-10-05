@@ -561,7 +561,6 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
       // Delete user from Firebase Auth
       if (targetUser.firebase_uid) {
         try {
-          console.log('🔥 Deleting user from Firebase Auth:', targetUser.firebase_uid);
           await admin.auth().deleteUser(targetUser.firebase_uid);
         } catch (firebaseError) {
         }

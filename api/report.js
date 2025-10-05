@@ -34,12 +34,10 @@ router.post('/', authMiddleware, async (req, res) => {
     );
 
     const report = rows[0];
-    console.log('✅ Report created successfully:', { reportid: report.reportid, title: report.title });
 
     // Create images if provided
     let createdImages = [];
     if (images && Array.isArray(images) && images.length > 0) {
-      console.log('📷 Creating images for report:', report.reportid);
 
       for (const imageUrl of images) {
         // Validate image URL format
@@ -54,7 +52,6 @@ router.post('/', authMiddleware, async (req, res) => {
         );
 
         createdImages.push(imageRows[0]);
-        console.log('✅ Image created:', { imageid: imageRows[0].imageid, imageUrl });
       }
     }
 
@@ -200,7 +197,6 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Status is required' });
     }
 
-    console.log('📝 Update report status request:', { reportId, status, requester: req.user.userid });
 
     const { rows } = await pool.query(
       'UPDATE reports SET status = $1, updated_at = NOW() WHERE reportid = $2 RETURNING *',
@@ -234,7 +230,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     const reportId = parseInt(id);
 
-    console.log('🗑️ Delete report request:', { reportId, requester: req.user.userid, role: req.user.role });
 
     // Check if report exists
     const { rows: reportRows } = await pool.query(
@@ -251,11 +246,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     // Delete report (images will be deleted automatically due to CASCADE DELETE)
     await pool.query('DELETE FROM reports WHERE reportid = $1', [reportId]);
 
-    console.log('✅ Report deleted successfully:', {
-      reportid: report.reportid,
-      title: report.title,
-      userid: report.userid
-    });
 
     res.json({
       message: 'Report deleted successfully',

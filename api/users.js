@@ -130,7 +130,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const { user_name, user_phone, user_email } = req.body;
 
-    console.log('👤 Update user request:', { id, user_name, user_phone, user_email, requester: req.user.userid, role: req.user.role });
 
     // Users can only update their own profile unless they're admin
     if (req.user.role !== 'admin' && req.user.userid !== parseInt(id)) {
@@ -176,7 +175,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    console.log('✅ User updated successfully:', rows[0]);
     res.json({ message: 'User updated successfully', user: rows[0] });
   } catch (err) {
     console.error('❌ Error updating user:', err);
@@ -316,7 +314,6 @@ router.put('/:id/password', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const { currentPassword, newPassword } = req.body;
 
-    console.log('🔐 Change password request:', { id, requester: req.user.userid, role: req.user.role });
 
     // Users can only change their own password unless they're admin
     if (req.user.role !== 'admin' && req.user.userid !== parseInt(id)) {
@@ -363,7 +360,6 @@ router.put('/:id/password', authMiddleware, async (req, res) => {
       [hashedNewPassword, id]
     );
 
-    console.log('✅ Password changed successfully for user:', rows[0].user_name);
     res.json({ message: 'Password changed successfully' });
   } catch (err) {
     console.error('❌ Error changing password:', err);

@@ -6,8 +6,6 @@ const authMiddleware = require('../middleware/auth');
 // Helper function to calculate and update area averages
 async function calculateAreaAverages(areaId) {
   try {
-    console.log(`🔄 Calculating averages for area ${areaId}...`);
-
     // Get all measurements for this area
     const { rows: measurements } = await pool.query(
       'SELECT temperature, moisture, ph, phosphorus, potassium, nitrogen FROM measurement WHERE areasid = $1',
@@ -15,7 +13,6 @@ async function calculateAreaAverages(areaId) {
     );
 
     if (measurements.length === 0) {
-      console.log(`⚠️ No measurements found for area ${areaId}`);
       return;
     }
 
@@ -50,14 +47,6 @@ async function calculateAreaAverages(areaId) {
       areaId
     ]);
 
-    console.log(`✅ Updated area ${areaId} with averages:`);
-    console.log(`   Temperature: ${roundValue(temperature_avg, 2)}°C`);
-    console.log(`   Moisture: ${roundValue(moisture_avg, 2)}%`);
-    console.log(`   pH: ${roundValue(ph_avg, 2)}`);
-    console.log(`   Phosphorus: ${roundValue(phosphorus_avg, 2)} ppm`);
-    console.log(`   Potassium: ${roundValue(potassium_avg, 2)} ppm`);
-    console.log(`   Nitrogen: ${roundValue(nitrogen_avg, 2)} ppm`);
-    console.log(`   Total Measurements: ${totalMeasurements}`);
 
   } catch (err) {
     console.error(`❌ Error calculating averages for area ${areaId}:`, err.message);
@@ -583,7 +572,6 @@ router.put('/calculate-all-area-averages', authMiddleware, async (req, res) => {
         [area.areasid]
       );
 
-      console.log(`🔍 Area ${area.areasid}: Found ${measurements.length} measurements`);
 
       if (measurements.length > 0) {
         const totalMeasurements = measurements.length;
@@ -655,7 +643,6 @@ router.put('/calculate-area-averages/:areaId', authMiddleware, async (req, res) 
       [areaId]
     );
 
-    console.log(`🔍 Area ${areaId}: Found ${measurements.length} measurements`);
 
     if (measurements.length === 0) {
       return res.status(404).json({ message: 'No measurements found for this area' });
