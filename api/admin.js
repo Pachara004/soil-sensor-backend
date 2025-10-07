@@ -32,10 +32,10 @@ router.post('/devices', authMiddleware, adminMiddleware, async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO device (device_name, device_id, userid, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
+      `INSERT INTO device (device_name, device_id, device_type, userid, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING *`,
-      [device_name, device_id || null, userid]
+      [device_name, device_id || null, false, userid]
     );
 
     res.status(201).json({ message: 'Device added successfully', device: rows[0] });
@@ -85,13 +85,12 @@ router.put('/users/:userId', authMiddleware, adminMiddleware, async (req, res) =
     const { rows } = await pool.query(
       `UPDATE users 
        SET user_name = COALESCE($1, user_name),
-           user_name = COALESCE($2, user_name),
-           user_phone = COALESCE($3, user_phone),
-           role = COALESCE($4, role),
+           user_phone = COALESCE($2, user_phone),
+           role = COALESCE($3, role),
            updated_at = NOW()
-       WHERE userid = $5
-       RETURNING userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
-      [user_name, user_name, user_phone, role, userId]
+       WHERE userid = $4
+       RETURNING userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at`,
+      [user_name, user_phone, role, userId]
     );
 
     if (rows.length === 0) {

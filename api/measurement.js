@@ -296,11 +296,10 @@ router.post('/create-area', authMiddleware, async (req, res) => {
       };
 
       const areaSize = extractAreaSize(area_name);
-      const finalLocation = areaSize !== null ? areaSize.toString() : "0.00";
 
       const { rows: measurementRows } = await pool.query(
-        `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, location, lng, lat, is_epoch, is_uptime, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+        `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
          RETURNING *`,
         [
           deviceId,
@@ -312,11 +311,8 @@ router.post('/create-area', authMiddleware, async (req, res) => {
           measurement.phosphorus,
           measurement.potassium,
           measurement.nitrogen,
-          measurement.location || finalLocation,
           roundLatLng(measurement.lng, 8), // High precision longitude
-          roundLatLng(measurement.lat, 8), // High precision latitude
-          measurement.is_epoch || false,
-          measurement.is_uptime || false
+          roundLatLng(measurement.lat, 8) // High precision latitude
         ]
       );
 
@@ -386,8 +382,8 @@ router.post('/single-point', authMiddleware, async (req, res) => {
     const measurementTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
        RETURNING *`,
       [
         deviceId,
@@ -401,9 +397,7 @@ router.post('/single-point', authMiddleware, async (req, res) => {
         roundValue(nitrogen, 2, 99), // Nitrogen: max 99
         roundLatLng(lng, 8), // Longitude: high precision for accurate map positioning
         roundLatLng(lat, 8), // Latitude: high precision for accurate map positioning
-        areaId || null, // Areas ID
-        false, // is_epoch
-        false  // is_uptime
+        areaId || null // Areas ID
       ]
     );
 
@@ -441,11 +435,8 @@ router.post('/', authMiddleware, async (req, res) => {
       phosphorus,
       potassium,
       nitrogen,
-      location,
       lng,
       lat,
-      is_epoch,
-      is_uptime,
       customLocationName,
       autoLocationName,
       locationNameType,
@@ -491,12 +482,9 @@ router.post('/', authMiddleware, async (req, res) => {
       return null;
     };
 
-    // Extract area size from location or customLocationName
-    const locationText = customLocationName || location;
+    // Extract area size from customLocationName (for area creation if needed)
+    const locationText = customLocationName;
     const areaSize = extractAreaSize(locationText);
-
-    // Use area size as location value (in square meters)
-    const finalLocation = areaSize !== null ? areaSize.toString() : "0.00";
 
     // Round numeric values to prevent overflow and limit to safe ranges
     const roundValue = (value, decimals = 2, max = 99) => {
@@ -514,8 +502,8 @@ router.post('/', authMiddleware, async (req, res) => {
     };
 
     const { rows } = await pool.query(
-      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, is_epoch, is_uptime, created_at)  
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO measurement (deviceid, measurement_date, measurement_time, temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, areasid, created_at)  
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
        RETURNING *`,
       [
         finalDeviceId,
@@ -529,9 +517,7 @@ router.post('/', authMiddleware, async (req, res) => {
         roundValue(nitrogen, 2, 99), // Nitrogen: max 99
         roundLatLng(lng, 8), // Longitude: high precision for accurate map positioning
         roundLatLng(lat, 8), // Latitude: high precision for accurate map positioning
-        areaId || null, // Areas ID from request body
-        is_epoch || false,
-        is_uptime || false
+        areaId || null // Areas ID from request body
       ]
     );
 
@@ -777,7 +763,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
       phosphorus,
       potassium,
       nitrogen,
-      location,
       lng,
       lat
     } = req.body;
@@ -790,12 +775,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
            phosphorus = COALESCE($4, phosphorus),
            potassium = COALESCE($5, potassium),
            nitrogen = COALESCE($6, nitrogen),
-           location = COALESCE($7, location),
-           lng = COALESCE($8, lng),
-           lat = COALESCE($9, lat)
-       WHERE measurementid = $10
+           lng = COALESCE($7, lng),
+           lat = COALESCE($8, lat)
+       WHERE measurementid = $9
        RETURNING *`,
-      [temperature, moisture, ph, phosphorus, potassium, nitrogen, location, lng, lat, id]
+      [temperature, moisture, ph, phosphorus, potassium, nitrogen, lng, lat, id]
     );
 
     if (rows.length === 0) {
