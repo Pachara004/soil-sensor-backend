@@ -445,7 +445,38 @@ router.post('/', authMiddleware, async (req, res) => {
     } = req.body;
 
     // Handle both deviceid and deviceId fields for compatibility
-    const finalDeviceId = deviceid || deviceId;
+    let finalDeviceId = deviceid || deviceId;
+    
+    console.log('🔍 Device ID Debug:', {
+      originalDeviceId: deviceId,
+      originalDeviceid: deviceid,
+      finalDeviceId: finalDeviceId,
+      type: typeof finalDeviceId,
+      isNaN: isNaN(finalDeviceId)
+    });
+
+    // If deviceId is a string (device name), find the corresponding deviceid
+    if (typeof finalDeviceId === 'string' && isNaN(finalDeviceId)) {
+      try {
+        console.log('🔍 Looking up device by name:', finalDeviceId);
+        const { rows: deviceRows } = await pool.query(
+          'SELECT deviceid FROM device WHERE device_name = $1 LIMIT 1',
+          [finalDeviceId]
+        );
+        
+        console.log('🔍 Device lookup result:', deviceRows);
+        
+        if (deviceRows.length === 0) {
+          return res.status(404).json({ message: `Device not found: ${finalDeviceId}` });
+        }
+        
+        finalDeviceId = deviceRows[0].deviceid;
+        console.log('✅ Device ID resolved to:', finalDeviceId);
+      } catch (err) {
+        console.error('❌ Error finding device:', err);
+        return res.status(500).json({ message: 'Error finding device' });
+      }
+    }
 
     // Handle date and time fields
     let finalMeasurementDate, finalMeasurementTime;

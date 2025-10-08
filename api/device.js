@@ -3,11 +3,83 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const authMiddleware = require('../middleware/auth');
 
+// No-auth middleware for public endpoints
+const noAuthMiddleware = (req, res, next) => {
+  next();
+};
+
 // Helper function to determine device_type based on device name
 const getDeviceType = (deviceName) => {
   if (!deviceName) return true; // Default to true if no name
   return !deviceName.toLowerCase().includes('test');
 };
+
+// Update device status (online/offline)
+router.patch('/:deviceName/status', async (req, res) => {
+  try {
+    const { deviceName } = req.params;
+    const { status } = req.body; // 'online' or 'offline'
+    
+    // Update device status in database
+    const { rows } = await pool.query(
+      `UPDATE device 
+       SET updated_at = NOW()
+       WHERE device_name = $1
+       RETURNING deviceid, device_name, userid`,
+      [deviceName]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+    
+    // For now, we'll just update the timestamp to indicate activity
+    // In a real implementation, you might want to add a status column
+    res.json({ 
+      message: 'Device status updated', 
+      device: rows[0],
+      status: status 
+    });
+  } catch (err) {
+    console.error('Error updating device status:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Heartbeat endpoint for ESP32 devices (no auth required)
+router.post('/:deviceName/heartbeat', noAuthMiddleware, async (req, res) => {
+  try {
+    const { deviceName } = req.params;
+    const { temperature, moisture, ph, phosphorus, potassium, nitrogen } = req.body;
+    
+    console.log(`💓 Heartbeat from ${deviceName}:`, {
+      temperature, moisture, ph, phosphorus, potassium, nitrogen
+    });
+    
+    // Update device timestamp to show it's online
+    const now = new Date(); // Use JavaScript Date object for current time
+    const { rows } = await pool.query(
+      `UPDATE device 
+       SET updated_at = $1
+       WHERE device_name = $2
+       RETURNING deviceid, device_name, userid`,
+      [now, deviceName]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+    
+    res.json({ 
+      message: 'Heartbeat received', 
+      device: rows[0],
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('Error processing heartbeat:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // Get devices for current user
 router.get('/', authMiddleware, async (req, res) => {
@@ -21,11 +93,22 @@ router.get('/', authMiddleware, async (req, res) => {
       [req.user.userid]
     );
 
-    // Add device_type to each device based on device_name
-    const devicesWithType = rows.map(device => ({
-      ...device,
-      device_type: getDeviceType(device.device_name)
-    }));
+    // Add device_type and online status to each device
+    const devicesWithType = rows.map(device => {
+      // Check if device is online (updated within last 2 minutes)
+      // Use a simple approach: if updated_at is recent, consider it online
+      const now = Date.now();
+      const updatedAt = new Date(device.updated_at).getTime();
+      const timeDiff = (now - updatedAt) / 1000; // seconds
+      const isOnline = timeDiff < 120; // 2 minutes
+
+      return {
+        ...device,
+        device_type: getDeviceType(device.device_name),
+        status: isOnline ? 'online' : 'offline',
+        last_seen: device.updated_at
+      };
+    });
 
     res.json(devicesWithType);
   } catch (err) {
@@ -291,6 +374,52 @@ router.post('/add', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Device added successfully', device: deviceResponse });
   } catch (err) {
     console.error('Error adding device:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get device info by device name (for ESP32 to get owner info)
+router.get('/info/:deviceName', noAuthMiddleware, async (req, res) => {
+  try {
+    const { deviceName } = req.params;
+
+    const { rows } = await pool.query(
+      `SELECT d.*, u.user_name, u.user_email 
+       FROM device d 
+       JOIN users u ON d.userid = u.userid 
+       WHERE d.device_name = $1`,
+      [deviceName]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    const device = rows[0];
+    
+    // Add device_type and online status
+    const now = Date.now();
+    const updatedAt = new Date(device.updated_at).getTime();
+    const timeDiff = (now - updatedAt) / 1000; // seconds
+    const isOnline = timeDiff < 120; // 2 minutes
+    
+    console.log(`🔍 Device status calculation for ${deviceName}:`, {
+      now: new Date(now).toISOString(),
+      updatedAt: new Date(updatedAt).toISOString(),
+      timeDiffSeconds: timeDiff,
+      isOnline: isOnline
+    });
+
+    const deviceResponse = {
+      ...device,
+      device_type: getDeviceType(device.device_name),
+      status: isOnline ? 'online' : 'offline',
+      last_seen: device.updated_at
+    };
+
+    res.json(deviceResponse);
+  } catch (err) {
+    console.error('Error fetching device info:', err);
     res.status(500).json({ message: err.message });
   }
 });

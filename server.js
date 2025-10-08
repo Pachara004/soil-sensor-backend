@@ -137,6 +137,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root endpoint for basic connectivity test
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Soil Sensor Backend API',
+    status: 'OK',
+    timestamp: new Date().toISOString()
+  });
+});
+
 /* --------------------
  * Socket.IO handlers
  * -------------------- */
@@ -210,8 +219,8 @@ io.on('connection', (socket) => {
 // Auth routes (JWT + PostgreSQL)
 app.use('/api/auth', require('./api/auth'));
 
-// Device routes (PostgreSQL)
-app.use('/api/devices', authMiddleware, require('./api/device'));
+// Device routes (PostgreSQL) - some endpoints don't need auth
+app.use('/api/devices', require('./api/device'));
 
 // User routes (PostgreSQL)
 app.use('/api/users', authMiddleware, require('./api/users'));
@@ -261,11 +270,13 @@ app.use((req, res) => {
  * -------------------- */
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, (err) => {
+server.listen(PORT, '0.0.0.0', (err) => {
   if (err) {
     console.error('Failed to start server:', err);
     process.exit(1);
   }
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🌐 Accessible from: http://172.16.0.241:${PORT}`);
 });
 
 /* --------------------
