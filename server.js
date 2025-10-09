@@ -231,6 +231,9 @@ app.use('/api/user', authMiddleware, require('./api/users'));
 // Device routes (PostgreSQL)
 app.use('/api/devices', require('./api/device'));
 
+// GPS routes (PostgreSQL)
+app.use('/api/gps', require('./api/gps'));
+
 // Measurement routes (PostgreSQL)
 app.use('/api/measurements', authMiddleware, require('./api/measurement'));
 

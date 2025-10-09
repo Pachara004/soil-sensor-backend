@@ -2,6 +2,45 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
 
+// Get all devices with user details
+router.get('/', async (req, res) => {
+  try {
+    console.log('🔍 Getting all devices...');
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        d.*,
+        u.user_name,
+        u.user_email,
+        u.role,
+        u.firebase_uid
+      FROM device d 
+      LEFT JOIN users u ON d.userid = u.userid 
+      ORDER BY d.created_at DESC
+    `);
+    
+    console.log(`📊 Found ${rows.length} devices`);
+    
+    const devices = rows.map(device => ({
+      deviceid: device.deviceid,
+      device_name: device.device_name,
+      device_status: device.device_status,
+      user_name: device.user_name,
+      user_email: device.user_email,
+      role: device.role,
+      firebase_uid: device.firebase_uid,
+      created_at: device.created_at,
+      updated_at: device.updated_at
+    }));
+    
+    res.json(devices);
+    
+  } catch (err) {
+    console.error('Error getting all devices:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Get device info with user details
 router.get('/info/:deviceName', async (req, res) => {
   try {
