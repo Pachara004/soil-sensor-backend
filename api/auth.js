@@ -635,6 +635,89 @@ router.get('/devices', async (req, res) => {
   }
 });
 
+// Temporary POST endpoint for /api/devices (until Render deploys new code)
+router.post('/devices', async (req, res) => {
+  try {
+    const { deviceId, device_name, status, device_type, description, userid } = req.body;
+    
+    console.log('🔧 Creating new device (temporary endpoint):', {
+      deviceId,
+      device_name,
+      status,
+      device_type,
+      description,
+      userid
+    });
+    
+    // Validate required fields
+    if (!deviceId || !device_name) {
+      return res.status(400).json({ 
+        message: 'deviceId and device_name are required' 
+      });
+    }
+    
+    // Check if device already exists
+    const existingDevice = await pool.query(
+      'SELECT deviceid FROM device WHERE device_name = $1 OR deviceid = $2',
+      [device_name, deviceId]
+    );
+    
+    if (existingDevice.rows.length > 0) {
+      return res.status(409).json({ 
+        message: 'Device already exists with this name or ID' 
+      });
+    }
+    
+    // Generate API key for device authentication
+    const apiKey = 'sk_' + Math.random().toString(36).substring(2, 15) + 
+                   Math.random().toString(36).substring(2, 15);
+    
+    // Insert new device
+    const result = await pool.query(`
+      INSERT INTO device (
+        deviceid, device_name, device_status, device_type, 
+        description, userid, api_key, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      RETURNING deviceid, device_name, device_status, device_type, 
+                description, userid, api_key, created_at, updated_at
+    `, [
+      deviceId,
+      device_name,
+      status || 'offline',
+      device_type || false,
+      description || null,
+      userid || null,
+      apiKey
+    ]);
+    
+    const newDevice = result.rows[0];
+    console.log('✅ Device created successfully (temporary):', {
+      deviceid: newDevice.deviceid,
+      device_name: newDevice.device_name,
+      api_key: newDevice.api_key.substring(0, 10) + '...'
+    });
+    
+    res.status(201).json({
+      message: 'Device created successfully',
+      device: {
+        deviceid: newDevice.deviceid,
+        device_name: newDevice.device_name,
+        device_status: newDevice.device_status,
+        device_type: newDevice.device_type,
+        description: newDevice.description,
+        userid: newDevice.userid,
+        api_key: newDevice.api_key,
+        created_at: newDevice.created_at,
+        updated_at: newDevice.updated_at
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error creating device (temporary):', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Debug endpoint to check token
 router.post('/debug-token', async (req, res) => {
   try {

@@ -137,4 +137,162 @@ router.get('/info-by-id/:deviceId', async (req, res) => {
   }
 });
 
+// Create new device
+router.post('/', async (req, res) => {
+  try {
+    const { deviceId, device_name, status, device_type, description, userid } = req.body;
+    
+    console.log('🔧 Creating new device:', {
+      deviceId,
+      device_name,
+      status,
+      device_type,
+      description,
+      userid
+    });
+    
+    // Validate required fields
+    if (!deviceId || !device_name) {
+      return res.status(400).json({ 
+        message: 'deviceId and device_name are required' 
+      });
+    }
+    
+    // Check if device already exists
+    const existingDevice = await pool.query(
+      'SELECT deviceid FROM device WHERE device_name = $1 OR deviceid = $2',
+      [device_name, deviceId]
+    );
+    
+    if (existingDevice.rows.length > 0) {
+      return res.status(409).json({ 
+        message: 'Device already exists with this name or ID' 
+      });
+    }
+    
+    // Generate API key for device authentication
+    const apiKey = 'sk_' + Math.random().toString(36).substring(2, 15) + 
+                   Math.random().toString(36).substring(2, 15);
+    
+    // Insert new device
+    const result = await pool.query(`
+      INSERT INTO device (
+        deviceid, device_name, device_status, device_type, 
+        description, userid, api_key, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      RETURNING deviceid, device_name, device_status, device_type, 
+                description, userid, api_key, created_at, updated_at
+    `, [
+      deviceId,
+      device_name,
+      status || 'offline',
+      device_type || false,
+      description || null,
+      userid || null,
+      apiKey
+    ]);
+    
+    const newDevice = result.rows[0];
+    console.log('✅ Device created successfully:', {
+      deviceid: newDevice.deviceid,
+      device_name: newDevice.device_name,
+      api_key: newDevice.api_key.substring(0, 10) + '...'
+    });
+    
+    res.status(201).json({
+      message: 'Device created successfully',
+      device: {
+        deviceid: newDevice.deviceid,
+        device_name: newDevice.device_name,
+        device_status: newDevice.device_status,
+        device_type: newDevice.device_type,
+        description: newDevice.description,
+        userid: newDevice.userid,
+        api_key: newDevice.api_key,
+        created_at: newDevice.created_at,
+        updated_at: newDevice.updated_at
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error creating device:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Update device
+router.put('/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { device_name, device_status, device_type, description, userid } = req.body;
+    
+    console.log('🔧 Updating device:', deviceId);
+    
+    const result = await pool.query(`
+      UPDATE device 
+      SET device_name = COALESCE($1, device_name),
+          device_status = COALESCE($2, device_status),
+          device_type = COALESCE($3, device_type),
+          description = COALESCE($4, description),
+          userid = COALESCE($5, userid),
+          updated_at = NOW()
+      WHERE deviceid = $6
+      RETURNING deviceid, device_name, device_status, device_type, 
+                description, userid, created_at, updated_at
+    `, [device_name, device_status, device_type, description, userid, deviceId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+    
+    const updatedDevice = result.rows[0];
+    console.log('✅ Device updated successfully:', {
+      deviceid: updatedDevice.deviceid,
+      device_name: updatedDevice.device_name
+    });
+    
+    res.json({
+      message: 'Device updated successfully',
+      device: updatedDevice
+    });
+    
+  } catch (err) {
+    console.error('Error updating device:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Delete device
+router.delete('/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    console.log('🗑️ Deleting device:', deviceId);
+    
+    // Delete related measurements first
+    await pool.query('DELETE FROM measurement WHERE deviceid = $1', [deviceId]);
+    
+    // Delete device
+    const result = await pool.query(
+      'DELETE FROM device WHERE deviceid = $1 RETURNING device_name',
+      [deviceId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+    
+    console.log('✅ Device deleted successfully:', result.rows[0].device_name);
+    
+    res.json({
+      message: 'Device deleted successfully',
+      device_name: result.rows[0].device_name
+    });
+    
+  } catch (err) {
+    console.error('Error deleting device:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
