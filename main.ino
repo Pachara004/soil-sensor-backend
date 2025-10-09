@@ -2328,18 +2328,12 @@ void loop() {
     s_lastWiFiCheck = millis();
   }
   
-  // ลองเชื่อมต่อ API ใหม่ทุก 15 วิ (ถ้ายังไม่ได้เชื่อมต่อ) - ลดเวลาเพื่อให้เสถียรขึ้น
+  // ลองเชื่อมต่อ API ใหม่ทุก 30 วิ (ถ้ายังไม่ได้เชื่อมต่อ)
   static unsigned long s_lastApiRetry = 0;
   static bool lastApiStatus = false;
-  if (WiFi.status() == WL_CONNECTED && !apiConnected && millis() - s_lastApiRetry > 15000) {
-    Serial.println("🔄 Retrying API connection...");
-    if (apiHealthCheck_min()) {
-      Serial.println("✅ API health check passed");
-      apiConnected = true;
-    } else {
-      Serial.println("❌ API health check failed, trying device auth...");
-      apiLoginAndGetToken();
-    }
+  if (WiFi.status() == WL_CONNECTED && !apiConnected && millis() - s_lastApiRetry > 30000) {
+    Serial.println("Retrying API connection...");
+    apiLoginAndGetToken();
     s_lastApiRetry = millis();
     needsWifiRedraw = true; // อัปเดต UI
   }

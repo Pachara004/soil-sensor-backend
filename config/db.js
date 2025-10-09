@@ -1,8 +1,7 @@
 const { Pool } = require('pg');
 
-// ใช้ Environment Variables สำหรับ Render
-const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_moC9gDneHaZ3@ep-wild-water-a1qolg9l-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
-
+// กำหนด connection string ของคุณจาก Neon
+const connectionString = 'postgresql://neondb_owner:npg_moC9gDneHaZ3@ep-wild-water-a1qolg9l-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 const pool = new Pool({
   connectionString: connectionString,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -22,4 +21,4 @@ const connectDB = async () => {
 // เรียกใช้ฟังก์ชันเพื่อทดสอบการเชื่อมต่อ
 connectDB();
 
-module.exports = { pool, connectDB };
+module.exports = { pool, connectDB };''

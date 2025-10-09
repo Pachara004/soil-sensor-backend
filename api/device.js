@@ -140,6 +140,8 @@ router.get('/info-by-id/:deviceId', async (req, res) => {
 // Create new device
 router.post('/', async (req, res) => {
   try {
+    console.log('📥 Raw request body:', JSON.stringify(req.body));
+    
     const { deviceId, device_name, status, device_type, description, userid } = req.body;
     
     console.log('🔧 Creating new device:', {
@@ -158,15 +160,34 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Check if device already exists
-    const existingDevice = await pool.query(
-      'SELECT deviceid FROM device WHERE device_name = $1 OR deviceid = $2',
-      [device_name, deviceId]
+    // Check if device already exists by device_name
+    const existingDeviceByName = await pool.query(
+      'SELECT deviceid, device_name FROM device WHERE device_name = $1',
+      [device_name]
     );
     
-    if (existingDevice.rows.length > 0) {
+    if (existingDeviceByName.rows.length > 0) {
+      console.log('❌ Device with name already exists:', existingDeviceByName.rows[0]);
       return res.status(409).json({ 
-        message: 'Device already exists with this name or ID' 
+        message: 'Device with this name already exists',
+        existingDevice: existingDeviceByName.rows[0]
+      });
+    }
+    
+    // Check if device already exists by deviceId (convert to integer if possible)
+    let existingDeviceById = { rows: [] };
+    if (!isNaN(deviceId)) {
+      existingDeviceById = await pool.query(
+        'SELECT deviceid, device_name FROM device WHERE deviceid = $1',
+        [parseInt(deviceId)]
+      );
+    }
+    
+    if (existingDeviceById.rows.length > 0) {
+      console.log('❌ Device with ID already exists:', existingDeviceById.rows[0]);
+      return res.status(409).json({ 
+        message: 'Device with this ID already exists',
+        existingDevice: existingDeviceById.rows[0]
       });
     }
     
@@ -174,20 +195,17 @@ router.post('/', async (req, res) => {
     const apiKey = 'sk_' + Math.random().toString(36).substring(2, 15) + 
                    Math.random().toString(36).substring(2, 15);
     
-    // Insert new device
+    // Insert new device (let database auto-generate deviceid)
     const result = await pool.query(`
       INSERT INTO device (
-        deviceid, device_name, device_status, device_type, 
-        description, userid, api_key, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-      RETURNING deviceid, device_name, device_status, device_type, 
-                description, userid, api_key, created_at, updated_at
+        device_name, device_type, 
+        userid, api_key, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, NOW(), NOW())
+      RETURNING deviceid, device_name, device_type, 
+                userid, api_key, created_at, updated_at
     `, [
-      deviceId,
       device_name,
-      status || 'offline',
       device_type || false,
-      description || null,
       userid || null,
       apiKey
     ]);
@@ -204,9 +222,9 @@ router.post('/', async (req, res) => {
       device: {
         deviceid: newDevice.deviceid,
         device_name: newDevice.device_name,
-        device_status: newDevice.device_status,
+        device_status: 'offline', // Default status
         device_type: newDevice.device_type,
-        description: newDevice.description,
+        description: description || null, // Use input description
         userid: newDevice.userid,
         api_key: newDevice.api_key,
         created_at: newDevice.created_at,
@@ -215,8 +233,25 @@ router.post('/', async (req, res) => {
     });
     
   } catch (err) {
-    console.error('Error creating device:', err);
-    res.status(500).json({ message: err.message });
+    console.error('❌ Error creating device:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail
+    });
+    
+    // Handle specific database errors
+    if (err.code === '23505') { // Unique constraint violation
+      return res.status(409).json({ 
+        message: 'Device with this name or ID already exists',
+        error: 'DUPLICATE_DEVICE'
+      });
+    }
+    
+    res.status(500).json({ 
+      message: 'Internal server error',
+      error: err.message 
+    });
   }
 });
 
