@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
         u.user_email,
         u.role,
         u.firebase_uid
-      FROM device d 
+       FROM device d 
       LEFT JOIN users u ON d.userid = u.userid 
       ORDER BY d.created_at DESC
     `);
@@ -33,6 +33,11 @@ router.get('/', async (req, res) => {
         deviceid: device.deviceid,
         device_name: device.device_name,
         device_status: isOnline ? 'online' : 'offline',
+        sensor_status: device.sensor_status || 'offline',
+        sensor_online: device.sensor_online || false,
+        last_temperature: device.last_temperature,
+        last_moisture: device.last_moisture,
+        last_ph: device.last_ph,
         user_name: device.user_name,
         user_email: device.user_email,
         role: device.role,
@@ -66,11 +71,11 @@ router.get('/info/:deviceName', async (req, res) => {
         u.user_email,
         u.role,
         u.firebase_uid
-      FROM device d 
+       FROM device d 
       LEFT JOIN users u ON d.userid = u.userid 
       WHERE d.device_name = $1
     `, [deviceName]);
-    
+
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Device not found' });
     }
@@ -368,6 +373,98 @@ router.delete('/:deviceId', async (req, res) => {
     
   } catch (err) {
     console.error('Error deleting device:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Heartbeat endpoint - รับ sensor status และ measurement data
+router.post('/:deviceName/heartbeat', async (req, res) => {
+  try {
+    const { deviceName } = req.params;
+    const { 
+      deviceId, 
+      ip, 
+      rssi, 
+      fw, 
+      sensorOnline,
+      sensorStatus,
+      temperature,
+      moisture,
+      ph
+    } = req.body;
+    
+    console.log('💓 Heartbeat from:', deviceName, {
+      sensorStatus,
+      sensorOnline,
+      temperature,
+      moisture,
+      ph
+    });
+    
+    // อัปเดต device พร้อม sensor status และ measurement data
+    const result = await pool.query(`
+      UPDATE device 
+      SET 
+        updated_at = NOW(),
+        sensor_status = $2,
+        sensor_online = $3,
+        last_temperature = $4,
+        last_moisture = $5,
+        last_ph = $6
+      WHERE device_name = $1
+      RETURNING *
+    `, [
+      deviceName, 
+      sensorStatus || 'offline', 
+      sensorOnline || false, 
+      temperature || null, 
+      moisture || null, 
+      ph || null
+    ]);
+    
+    if (result.rows.length === 0) {
+      console.log('❌ Device not found:', deviceName);
+      return res.status(404).json({ message: 'Device not found' });
+    }
+    
+    const device = result.rows[0];
+    console.log('✅ Heartbeat updated:', {
+      device_name: device.device_name,
+      sensor_status: device.sensor_status,
+      sensor_online: device.sensor_online,
+      last_temperature: device.last_temperature,
+      last_moisture: device.last_moisture,
+      last_ph: device.last_ph
+    });
+    
+    // ดึงข้อมูล user
+    let userName = null;
+    if (device.userid) {
+      const userResult = await pool.query(
+        'SELECT user_name FROM users WHERE userid = $1',
+        [device.userid]
+      );
+      if (userResult.rows.length > 0) {
+        userName = userResult.rows[0].user_name;
+      }
+    }
+    
+    res.json({
+      message: 'Heartbeat received',
+      device: {
+        device_name: device.device_name,
+        sensor_status: device.sensor_status,
+        sensor_online: device.sensor_online,
+        last_temperature: device.last_temperature,
+        last_moisture: device.last_moisture,
+        last_ph: device.last_ph,
+        updated_at: device.updated_at
+      },
+      user_name: userName
+    });
+    
+  } catch (err) {
+    console.error('❌ Error in heartbeat:', err);
     res.status(500).json({ message: err.message });
   }
 });
