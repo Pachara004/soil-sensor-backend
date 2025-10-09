@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin'); // สำหรับ verify Google ID token (ตัวเลือก)
 const { pool } = require('../config/db');
 const { sendEmail } = require('../utils/email');
+const authMiddleware = require('../middleware/auth');
 
 router.post('/register', async (req, res) => {
   const { email, username, name, phoneNumber, type, firebaseUid, firebase_uid } = req.body;
@@ -500,7 +501,7 @@ router.delete('/delete-account', require('../middleware/auth'), async (req, res)
 });
 
 // Admin endpoint to delete any user (admin only)
-router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async (req, res) => {
+router.delete('/admin/delete-user/:userid', authMiddleware, async (req, res) => {
   try {
     // Check if current user is admin
     if (req.user.role !== 'admin') {
@@ -508,14 +509,13 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
     }
 
     const targetUserid = parseInt(req.params.userid);
-    if (!targetUserid) {
+    if (!targetUserid || isNaN(targetUserid)) {
       return res.status(400).json({ message: 'Invalid user ID' });
     }
 
     if (targetUserid === req.user.userid) {
       return res.status(400).json({ message: 'Cannot delete yourself' });
     }
-
 
     // Get target user data
     const { rows } = await pool.query(
@@ -535,16 +535,16 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
     try {
       await client.query('BEGIN');
 
-      // Delete related data
+      // Delete related data in correct order (foreign key constraints)
+
+      // Delete measurements first (they reference areas and devices)
+      await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [targetUserid]);
 
       // Delete areas_at relationships
       await client.query('DELETE FROM areas_at WHERE areasid IN (SELECT areasid FROM areas WHERE userid = $1)', [targetUserid]);
 
       // Delete areas
       await client.query('DELETE FROM areas WHERE userid = $1', [targetUserid]);
-
-      // Delete measurements
-      await client.query('DELETE FROM measurement WHERE deviceid IN (SELECT deviceid FROM device WHERE userid = $1)', [targetUserid]);
 
       // Delete devices
       await client.query('DELETE FROM device WHERE userid = $1', [targetUserid]);
@@ -558,11 +558,13 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
       // Delete user from PostgreSQL
       await client.query('DELETE FROM users WHERE userid = $1', [targetUserid]);
 
-      // Delete user from Firebase Auth
+      // Delete user from Firebase Auth (if exists)
       if (targetUser.firebase_uid) {
         try {
           await admin.auth().deleteUser(targetUser.firebase_uid);
+          console.log('Firebase user deleted:', targetUser.firebase_uid);
         } catch (firebaseError) {
+          console.log('Firebase user deletion failed (may not exist):', firebaseError.message);
         }
       }
 
@@ -579,6 +581,7 @@ router.delete('/admin/delete-user/:userid', require('../middleware/auth'), async
 
     } catch (error) {
       await client.query('ROLLBACK');
+      console.error('Transaction error:', error);
       throw error;
     } finally {
       client.release();

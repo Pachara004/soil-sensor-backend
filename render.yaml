@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: soil-sensor-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_moC9gDneHaZ3@ep-wild-water-a1qolg9l-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: JWT_SECRET
+        value: your-secret-key

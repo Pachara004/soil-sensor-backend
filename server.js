@@ -228,6 +228,9 @@ app.use('/api/users', authMiddleware, require('./api/users'));
 // User alias routes for Angular compatibility
 app.use('/api/user', authMiddleware, require('./api/users'));
 
+// Device routes (PostgreSQL)
+app.use('/api/devices', require('./api/device'));
+
 // Measurement routes (PostgreSQL)
 app.use('/api/measurements', authMiddleware, require('./api/measurement'));
 
@@ -277,6 +280,9 @@ server.listen(PORT, '0.0.0.0', (err) => {
   }
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`🌐 Accessible from: http://172.16.0.241:${PORT}`);
+  console.log(`🌐 Also accessible from: http://10.197.169.7:${PORT}`);
+  console.log(`📡 ESP32 can connect from: http://172.16.0.241:${PORT}`);
+  console.log(`🔧 Make sure Windows Firewall allows port ${PORT}`);
 });
 
 /* --------------------
