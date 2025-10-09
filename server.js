@@ -10,6 +10,7 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const dotenv = require('dotenv');
 const { connectDB } = require('./config/db');
+const { authMiddleware } = require('./middleware/auth');
 
 dotenv.config();
 
@@ -123,7 +124,6 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 /* --------------------
  * Helper: Auth Guard (Firebase ID token)
  * -------------------- */
-const authMiddleware = require('./middleware/auth');
 
 /* --------------------
  * Health Check

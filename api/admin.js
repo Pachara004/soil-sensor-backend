@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 
 // Middleware เพื่อ check ถ้าเป็น admin
 const adminMiddleware = (req, res, next) => {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
+const { authMiddleware } = require('../middleware/auth');
 
 // Get all devices with user details
 router.get('/', async (req, res) => {
@@ -21,17 +22,27 @@ router.get('/', async (req, res) => {
     
     console.log(`📊 Found ${rows.length} devices`);
     
-    const devices = rows.map(device => ({
-      deviceid: device.deviceid,
-      device_name: device.device_name,
-      device_status: device.device_status,
-      user_name: device.user_name,
-      user_email: device.user_email,
-      role: device.role,
-      firebase_uid: device.firebase_uid,
-      created_at: device.created_at,
-      updated_at: device.updated_at
-    }));
+    const devices = rows.map(device => {
+      // ตรวจสอบว่า device online หรือไม่ (updated_at ภายใน 5 นาที = online)
+      const now = new Date();
+      const updatedAt = new Date(device.updated_at);
+      const timeDiff = (now - updatedAt) / 1000 / 60; // นาที
+      const isOnline = timeDiff <= 5; // 5 นาที
+      
+      return {
+        deviceid: device.deviceid,
+        device_name: device.device_name,
+        device_status: isOnline ? 'online' : 'offline',
+        user_name: device.user_name,
+        user_email: device.user_email,
+        role: device.role,
+        firebase_uid: device.firebase_uid,
+        created_at: device.created_at,
+        updated_at: device.updated_at,
+        last_seen: device.updated_at,
+        is_online: isOnline
+      };
+    });
     
     res.json(devices);
     
@@ -72,15 +83,23 @@ router.get('/info/:deviceName', async (req, res) => {
       role: device.role
     });
     
+    // ตรวจสอบว่า device online หรือไม่ (updated_at ภายใน 5 นาที = online)
+    const now = new Date();
+    const updatedAt = new Date(device.updated_at);
+    const timeDiff = (now - updatedAt) / 1000 / 60; // นาที
+    const isOnline = timeDiff <= 5; // 5 นาที
+    
     res.json({
       device_name: device.device_name,
-      device_status: device.device_status,
+      device_status: isOnline ? 'online' : 'offline',
       user_name: device.user_name,
       user_email: device.user_email,
       role: device.role,
       firebase_uid: device.firebase_uid,
       created_at: device.created_at,
-      updated_at: device.updated_at
+      updated_at: device.updated_at,
+      last_seen: device.updated_at,
+      is_online: isOnline
     });
     
   } catch (err) {
@@ -141,8 +160,14 @@ router.get('/info-by-id/:deviceId', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     console.log('📥 Raw request body:', JSON.stringify(req.body));
+    console.log('🔍 Request headers:', req.headers);
+    console.log('🔍 User from headers:', req.headers['x-user-id'] || req.headers['user-id'] || 'No user header');
     
     const { deviceId, device_name, status, device_type, description, userid } = req.body;
+    
+    // ดึง userid จาก body หรือ headers
+    let finalUserid = userid || req.headers['x-user-id'] || req.headers['user-id'];
+    console.log('🔍 Using userid from body/headers:', finalUserid);
     
     console.log('🔧 Creating new device:', {
       deviceId,
@@ -150,7 +175,10 @@ router.post('/', async (req, res) => {
       status,
       device_type,
       description,
-      userid
+      userid: finalUserid,
+      useridType: typeof finalUserid,
+      useridValue: finalUserid,
+      originalUserid: userid
     });
     
     // Validate required fields
@@ -206,7 +234,7 @@ router.post('/', async (req, res) => {
     `, [
       device_name,
       device_type || false,
-      userid || null,
+      finalUserid ? parseInt(finalUserid) : null,
       apiKey
     ]);
     
@@ -214,6 +242,7 @@ router.post('/', async (req, res) => {
     console.log('✅ Device created successfully:', {
       deviceid: newDevice.deviceid,
       device_name: newDevice.device_name,
+      userid: newDevice.userid,
       api_key: newDevice.api_key.substring(0, 10) + '...'
     });
     

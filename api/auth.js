@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin'); // สำหรับ verify Google ID token (ตัวเลือก)
 const { pool } = require('../config/db');
 const { sendEmail } = require('../utils/email');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 
 router.post('/register', async (req, res) => {
   const { email, username, name, phoneNumber, type, firebaseUid, firebase_uid } = req.body;
@@ -316,7 +316,7 @@ router.post('/verify-otp', async (req, res) => {
   res.json({ message: 'OTP verified' });
 });
 
-router.put('/change-password', require('../middleware/auth'), async (req, res) => {
+router.put('/change-password', require('../middleware/auth').authMiddleware, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   const { rows } = await pool.query('SELECT userid, user_password FROM users WHERE user_name=$1 LIMIT 1', [req.user.username]);
   const user = rows[0];
@@ -345,7 +345,7 @@ router.get('/users/check-username/:username', async (req, res) => {
 });
 
 // Save/complete profile for current Firebase user
-router.post('/complete-profile', require('../middleware/auth'), async (req, res) => {
+router.post('/complete-profile', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
     const { user_name, user_phone } = req.body;
     if (!user_name) {
@@ -376,7 +376,7 @@ router.post('/complete-profile', require('../middleware/auth'), async (req, res)
 });
 
 // Get current authenticated user's profile
-router.get('/me', require('../middleware/auth'), async (req, res) => {
+router.get('/me', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT userid, user_name, user_email, user_phone, role, firebase_uid FROM users WHERE userid=$1',
@@ -390,7 +390,7 @@ router.get('/me', require('../middleware/auth'), async (req, res) => {
 });
 
 // Alias endpoints for Angular compatibility
-router.get('/user/profile', require('../middleware/auth'), async (req, res) => {
+router.get('/user/profile', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT userid, user_name, user_email, user_phone, role, firebase_uid FROM users WHERE userid=$1',
@@ -403,7 +403,7 @@ router.get('/user/profile', require('../middleware/auth'), async (req, res) => {
   }
 });
 
-router.get('/user/me', require('../middleware/auth'), async (req, res) => {
+router.get('/user/me', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT userid, user_name, user_email, user_phone, role, firebase_uid FROM users WHERE userid=$1',
@@ -417,7 +417,7 @@ router.get('/user/me', require('../middleware/auth'), async (req, res) => {
 });
 
 // Delete user account (both Firebase Auth and PostgreSQL)
-router.delete('/delete-account', require('../middleware/auth'), async (req, res) => {
+router.delete('/delete-account', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
 
     // Get user data first
@@ -501,7 +501,7 @@ router.delete('/delete-account', require('../middleware/auth'), async (req, res)
 });
 
 // Admin endpoint to delete any user (admin only)
-router.delete('/admin/delete-user/:userid', authMiddleware, async (req, res) => {
+router.delete('/admin/delete-user/:userid', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {
     // Check if current user is admin
     if (req.user.role !== 'admin') {
