@@ -217,6 +217,18 @@ router.post('/', async (req, res) => {
       api_key: newDevice.api_key.substring(0, 10) + '...'
     });
     
+    // Get user information if userid is provided
+    let userInfo = null;
+    if (newDevice.userid) {
+      const userResult = await pool.query(
+        'SELECT userid, user_name, user_email, role FROM users WHERE userid = $1',
+        [newDevice.userid]
+      );
+      if (userResult.rows.length > 0) {
+        userInfo = userResult.rows[0];
+      }
+    }
+
     res.status(201).json({
       message: 'Device created successfully',
       device: {
@@ -228,7 +240,8 @@ router.post('/', async (req, res) => {
         userid: newDevice.userid,
         api_key: newDevice.api_key,
         created_at: newDevice.created_at,
-        updated_at: newDevice.updated_at
+        updated_at: newDevice.updated_at,
+        user: userInfo // Include user information
       }
     });
     
