@@ -596,6 +596,45 @@ router.delete('/admin/delete-user/:userid', authMiddleware, async (req, res) => 
   }
 });
 
+// Temporary endpoint for /api/devices (until Render deploys new code)
+router.get('/devices', async (req, res) => {
+  try {
+    console.log('🔍 Getting all devices (temporary endpoint)...');
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        d.*,
+        u.user_name,
+        u.user_email,
+        u.role,
+        u.firebase_uid
+      FROM device d 
+      LEFT JOIN users u ON d.userid = u.userid 
+      ORDER BY d.created_at DESC
+    `);
+    
+    console.log(`📊 Found ${rows.length} devices`);
+    
+    const devices = rows.map(device => ({
+      deviceid: device.deviceid,
+      device_name: device.device_name,
+      device_status: device.device_status,
+      user_name: device.user_name,
+      user_email: device.user_email,
+      role: device.role,
+      firebase_uid: device.firebase_uid,
+      created_at: device.created_at,
+      updated_at: device.updated_at
+    }));
+    
+    res.json(devices);
+    
+  } catch (err) {
+    console.error('Error getting all devices:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Debug endpoint to check token
 router.post('/debug-token', async (req, res) => {
   try {
