@@ -338,12 +338,6 @@ router.get('/check-username/:username', async (req, res) => {
   res.json({ exists: !!rows[0] });
 });
 
-// Alias for frontend compatibility
-router.get('/users/check-username/:username', async (req, res) => {
-  const { rows } = await pool.query('SELECT 1 FROM users WHERE user_name=$1 LIMIT 1', [req.params.username]);
-  res.json({ exists: !!rows[0] });
-});
-
 // Save/complete profile for current Firebase user
 router.post('/complete-profile', require('../middleware/auth').authMiddleware, async (req, res) => {
   try {

@@ -11,6 +11,7 @@ const admin = require('firebase-admin');
 const dotenv = require('dotenv');
 const { connectDB } = require('./config/db');
 const { authMiddleware } = require('./middleware/auth');
+const RealtimeMeasurementService = require('./services/realtime-measurement-service');
 
 dotenv.config();
 
@@ -66,20 +67,68 @@ if (hasFirebaseEnv) {
  * -------------------- */
 const app = express();
 const server = http.createServer(app);
+
+// Initialize WebSocket service
+const realtimeService = new RealtimeMeasurementService(server);
+
+// ================== CORS Configuration ==================
+// กำหนด allowed origins
+const allowedOrigins = [
+  'http://localhost:4200',           // Angular dev server
+  'http://localhost:3000',           // Backend dev server
+  'http://127.0.0.1:4200',
+  'http://127.0.0.1:3000',
+  'https://soil-sensor-frontend.vercel.app',  // Production frontend (ถ้ามี)
+  'https://soil-sensor-backend.onrender.com', // Production backend
+  process.env.FRONTEND_URL,          // จาก .env
+  process.env.CORS_ORIGIN            // จาก .env
+].filter(Boolean); // กรอง undefined/null ออก
+
+// Socket.IO with CORS
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     credentials: true,
+    methods: ['GET', 'POST']
   },
+  transports: ['websocket', 'polling']
 });
 
+// CORS options
+const corsOptions = {
+  origin: function (origin, callback) {
+    // อนุญาต requests ที่ไม่มี origin (เช่น mobile apps, Postman, ESP32)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // ตรวจสอบว่า origin อยู่ใน whitelist หรือไม่
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+      callback(null, true);
+    } else {
+      console.warn('⚠️  CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,                    // อนุญาต cookies
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-API-Key',
+    'x-api-key',
+    'Accept',
+    'Origin'
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 600  // Cache preflight request เป็นเวลา 10 นาที
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
 // Middlewares
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true,
-  })
-);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -228,14 +277,24 @@ app.use('/api/users', authMiddleware, require('./api/users'));
 // User alias routes for Angular compatibility
 app.use('/api/user', authMiddleware, require('./api/users'));
 
-// Device routes (PostgreSQL)
-app.use('/api/devices', require('./api/device'));
-
 // GPS routes (PostgreSQL)
 app.use('/api/gps', require('./api/gps'));
 
 // Measurement routes (PostgreSQL)
 app.use('/api/measurements', authMiddleware, require('./api/measurement'));
+// Firebase measurement endpoint (no auth required)
+app.use('/api/measurement-points', require('./api/measurement-points'));
+app.use('/api/manual-points', require('./api/manual-point-id'));
+app.use('/api/sequential', require('./api/sequential-measurement'));
+app.use('/api/gps-coordinates', require('./api/gps-coordinates'));
+// Areasid sync routes
+app.use('/api/areasid', require('./api/areasid-sync'));
+// Real-time measurement routes
+app.use('/api/realtime', require('./api/realtime-measurement'));
+// Device ownership routes
+app.use('/api/device', require('./api/device-ownership'));
+// Device management routes (with Firebase sync)
+app.use('/api/devices', require('./api/device-management'));
 
 // Area routes (PostgreSQL)
 app.use('/api/areas', authMiddleware, require('./api/area'));
@@ -248,6 +307,12 @@ app.use('/api/images', authMiddleware, require('./api/image'));
 
 // Admin routes (PostgreSQL)
 app.use('/api/admin', require('./api/admin'));
+
+// Firebase routes (Firebase Realtime Database)
+app.use('/api/firebase', require('./api/firebase'));
+
+// Firebase measurement sync routes
+app.use('/api/firebase-measurements', require('./api/firebase-measurement'));
 
 
 /* --------------------
@@ -300,6 +365,29 @@ server.on('error', (err) => {
   }
 });
 
+// Global error handler
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('❌ Stack:', error.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Global error handler for Express
+app.use((error, req, res, next) => {
+  console.error('❌ Express Error:', error);
+  console.error('❌ Request URL:', req.url);
+  console.error('❌ Request Method:', req.method);
+  console.error('❌ Request Body:', req.body);
+  
+  res.status(500).json({
+    message: 'Internal server error',
+    error: error.message
+  });
+});
+
 process.on('SIGTERM', () => {
   server.close(() => {
     process.exit(0);
@@ -311,3 +399,6 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+// Export realtimeService for API endpoints
+module.exports = { realtimeService };
