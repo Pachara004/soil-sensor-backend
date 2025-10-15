@@ -271,6 +271,26 @@ app.use('/api/auth', require('./api/auth'));
 // Device routes (PostgreSQL) - some endpoints don't need auth
 app.use('/api/devices', require('./api/device'));
 
+// Profile endpoint (standalone)
+app.get('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const { pool } = require('./config/db');
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      [req.user.userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ user: rows[0] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // User routes (PostgreSQL)
 app.use('/api/users', authMiddleware, require('./api/users'));
 

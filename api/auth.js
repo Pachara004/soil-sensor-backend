@@ -760,4 +760,23 @@ router.post('/debug-token', async (req, res) => {
   }
 });
 
+// Get current user profile (me endpoint)
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      [req.user.userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ user: rows[0] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
