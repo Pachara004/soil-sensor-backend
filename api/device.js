@@ -469,4 +469,77 @@ router.post('/:deviceName/heartbeat', async (req, res) => {
   }
 });
 
+// Get devices for specific user by Firebase UID
+router.get('/user/:firebaseUid', authMiddleware, async (req, res) => {
+  try {
+    const { firebaseUid } = req.params;
+    
+    console.log(`🔍 Getting devices for Firebase UID: ${firebaseUid}`);
+    
+    // First get userid from Firebase UID
+    const { rows: userRows } = await pool.query(
+      'SELECT userid FROM users WHERE firebase_uid = $1',
+      [firebaseUid]
+    );
+    
+    if (userRows.length === 0) {
+      console.log(`❌ User not found for Firebase UID: ${firebaseUid}`);
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    const userid = userRows[0].userid;
+    console.log(`✅ Found userid: ${userid} for Firebase UID: ${firebaseUid}`);
+    
+    // Get devices for this user
+    const { rows: deviceRows } = await pool.query(`
+      SELECT 
+        d.*,
+        u.user_name,
+        u.user_email,
+        u.role,
+        u.firebase_uid
+       FROM device d 
+      LEFT JOIN users u ON d.userid = u.userid 
+      WHERE d.userid = $1
+      ORDER BY d.created_at DESC
+    `, [userid]);
+    
+    console.log(`📊 Found ${deviceRows.length} devices for user ${userid}`);
+    
+    const devices = deviceRows.map(device => {
+      // ตรวจสอบว่า device online หรือไม่ (updated_at ภายใน 5 นาที = online)
+      const now = new Date();
+      const updatedAt = new Date(device.updated_at);
+      const timeDiff = (now - updatedAt) / 1000 / 60; // นาที
+      const isOnline = timeDiff <= 5; // 5 นาที
+      
+      return {
+        deviceid: device.deviceid,
+        device_name: device.device_name,
+        device_status: isOnline ? 'online' : 'offline',
+        sensor_status: device.sensor_status || 'offline',
+        sensor_online: device.sensor_online || false,
+        last_temperature: device.last_temperature,
+        last_moisture: device.last_moisture,
+        last_ph: device.last_ph,
+        user_name: device.user_name,
+        user_email: device.user_email,
+        role: device.role,
+        firebase_uid: device.firebase_uid,
+        created_at: device.created_at,
+        updated_at: device.updated_at,
+        last_seen: device.updated_at,
+        is_online: isOnline,
+        api_key: device.api_key ? device.api_key.substring(0, 10) + '...' : null
+      };
+    });
+    
+    res.json(devices);
+    
+  } catch (err) {
+    console.error('❌ Error fetching devices for user:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

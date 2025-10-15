@@ -1,0 +1,75 @@
+{
+    "areas": {
+      "areasid": "integer",
+      "area_name": "character varying",
+      "potassium_avg": "numeric",
+      "ph_avg": "numeric",
+      "temperature_avg": "numeric",
+      "totalmeasurement": "integer",
+      "textupdated": "timestamp without time zone",
+      "phosphorus_avg": "numeric",
+      "nitrogen_avg": "numeric",
+      "moisture_avg": "numeric",
+      "created_at": "timestamp without time zone",
+      "userid": "integer",
+      "deviceid": "integer"
+    },
+    "areas_at": {
+      "areasid": "integer",
+      "measurementid": "integer"
+    },
+    "device": {
+      "deviceid": "integer",
+      "device_name": "character varying",
+      "created_at": "timestamp without time zone",
+      "updated_at": "timestamp without time zone",
+      "userid": "integer",
+      "device_type": "boolean",
+      "api_key": "character varying"
+    },
+    "images": {
+      "imageid": "integer",
+      "reportid": "integer",
+      "imageurl": "text"
+    },
+    "measurement": {
+      "measurementid": "integer",
+      "deviceid": "integer",
+      "measurement_date": "date",
+      "measurement_time": "time without time zone",
+      "temperature": "numeric",
+      "moisture": "numeric",
+      "ph": "numeric",
+      "phosphorus": "numeric",
+      "nitrogen": "numeric",
+      "lng": "text",
+      "lat": "text",
+      "created_at": "timestamp without time zone",
+      "areasid": "integer",
+      "potassium": "numeric",
+      "point_id": "character varying"
+    },
+    "reports": {
+      "reportid": "integer",
+      "title": "character varying",
+      "description": "text",
+      "type": "character varying",
+      "priority": "character varying",
+      "status": "character varying",
+      "userid": "integer",
+      "created_at": "timestamp without time zone",
+      "updated_at": "timestamp without time zone"
+    },
+    "users": {
+      "userid": "integer",
+      "user_name": "character varying",
+      "user_email": "character varying",
+      "user_phone": "character varying",
+      "role": "character varying",
+      "created_at": "timestamp without time zone",
+      "updated_at": "timestamp without time zone",
+      "firebase_uid": "character varying",
+      "user_password": "character varying"
+    }
+  }
+  
