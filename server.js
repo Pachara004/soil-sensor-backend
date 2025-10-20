@@ -319,8 +319,10 @@ app.use('/api/devices', require('./api/device-management'));
 // Area routes (PostgreSQL)
 app.use('/api/areas', authMiddleware, require('./api/area'));
 
-// Report routes (PostgreSQL)
-app.use('/api/reports', authMiddleware, require('./api/report'));
+// Reports routes (PostgreSQL)
+app.use('/api/reports', require('./api/reports'));
+app.use('/api/user', require('./api/user-reports'));
+app.use('/api/user', require('./api/user-reports'));
 
 // Image routes (PostgreSQL)
 app.use('/api/images', authMiddleware, require('./api/image'));

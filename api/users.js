@@ -1,3 +1,4 @@
+// เพิ่มส่วนนี้ใน api/user.js หลังจาก require statements
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
@@ -307,7 +308,40 @@ router.get('/me', authMiddleware, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
+// GET /api/user/reports - ดึง reports ของ user ปัจจุบัน
+router.get('/reports', authMiddleware, async (req, res) => {
+  try {
+    console.log('📨 Fetching reports for user:', req.user.userid);
+    
+    const { rows } = await pool.query(
+      `SELECT 
+        reportid as id, 
+        userid as user_id, 
+        title, 
+        description as message, 
+        status, 
+        created_at, 
+        updated_at as read_at, 
+        priority, 
+        type
+       FROM reports 
+       WHERE userid = $1 
+       ORDER BY created_at DESC`,
+      [req.user.userid]
+    );
+    
+    console.log(`✅ Found ${rows.length} reports for user ${req.user.userid}`);
+    
+    res.json({ reports: rows, total: rows.length });
+    
+  } catch (err) {
+    console.error('❌ Error fetching user reports:', err);
+    res.status(500).json({ 
+      message: 'Failed to fetch reports', 
+      error: err.message 
+    });
+  }
+});
 // Change password (both admin and user)
 router.put('/:id/password', authMiddleware, async (req, res) => {
   try {
