@@ -90,7 +90,154 @@ router.get('/', firebaseAuthToUser, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
+// PUT /api/reports/:id/status - อัปเดต status ของ report (สำหรับ admin)
+router.put('/:id/status', firebaseAuthToUser, async (req, res) => {
+  try {
+    await ensureReportsTable();
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // ตรวจสอบว่า status ถูกต้อง
+    const validStatuses = ['open', 'in_progress', 'resolved', 'closed', 'read'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        message: 'Invalid status. Must be one of: open, in_progress, resolved, closed, read' 
+      });
+    }
+    
+    // อัปเดต status
+    const updateSql = `UPDATE reports 
+                       SET status = $1, updated_at = NOW()
+                       WHERE reportid = $2
+                       RETURNING reportid as id, userid as user_id, title, 
+                                 description as message, status, created_at, 
+                                 updated_at as read_at, priority, type`;
+    
+    const { rows } = await pool.query(updateSql, [status, id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+    
+    res.json({
+      success: true,
+      message: `Report status updated to ${status}`,
+      report: rows[0]
+    });
+    
+  } catch (err) {
+    console.error('❌ Error updating report status:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+// PUT /api/reports/:id - อัปเดตข้อมูล report ทั้งหมด (สำหรับ admin)
+router.put('/:id', firebaseAuthToUser, async (req, res) => {
+  try {
+    await ensureReportsTable();
+    const { id } = req.params;
+    const { title, message, status, priority, type } = req.body;
+    
+    // สร้าง dynamic query
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    if (title !== undefined) {
+      updates.push(`title = $${paramIndex}`);
+      values.push(title);
+      paramIndex++;
+    }
+    
+    if (message !== undefined) {
+      updates.push(`description = $${paramIndex}`);
+      values.push(message);
+      paramIndex++;
+    }
+    
+    if (status !== undefined) {
+      const validStatuses = ['open', 'in_progress', 'resolved', 'closed', 'read'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+      updates.push(`status = $${paramIndex}`);
+      values.push(status);
+      paramIndex++;
+    }
+    
+    if (priority !== undefined) {
+      updates.push(`priority = $${paramIndex}`);
+      values.push(priority);
+      paramIndex++;
+    }
+    
+    if (type !== undefined) {
+      updates.push(`type = $${paramIndex}`);
+      values.push(type);
+      paramIndex++;
+    }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No fields to update' });
+    }
+    
+    updates.push(`updated_at = NOW()`);
+    values.push(id);
+    
+    const updateSql = `
+      UPDATE reports 
+      SET ${updates.join(', ')}
+      WHERE reportid = $${paramIndex}
+      RETURNING reportid as id, userid as user_id, title, 
+                description as message, status, created_at, 
+                updated_at as read_at, priority, type
+    `;
+    
+    const { rows } = await pool.query(updateSql, values);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Report updated successfully',
+      report: rows[0]
+    });
+    
+  } catch (err) {
+    console.error('❌ Error updating report:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+// DELETE /api/reports/:id - ลบ report (สำหรับ admin)
+router.delete('/:id', firebaseAuthToUser, async (req, res) => {
+  try {
+    await ensureReportsTable();
+    const { id } = req.params;
+    
+    // ลบรูปภาพที่เกี่ยวข้องก่อน (ถ้ามี)
+    await pool.query('DELETE FROM images WHERE reportid = $1', [id]);
+    
+    // ลบ report
+    const { rows } = await pool.query(
+      'DELETE FROM reports WHERE reportid = $1 RETURNING reportid',
+      [id]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Report deleted successfully'
+    });
+    
+  } catch (err) {
+    console.error('❌ Error deleting report:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
 // GET /api/reports/unread-count - ดึงจำนวนข้อความที่ยังไม่ได้อ่านจาก PostgreSQL เท่านั้น
 router.get('/unread-count', firebaseAuthToUser, async (req, res) => {
   try {
