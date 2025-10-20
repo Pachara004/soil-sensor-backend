@@ -197,30 +197,50 @@ router.post('/google-login', async (req, res) => {
 });
 
 router.post('/send-otp', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ message: 'Email is required' });
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const ttlMs = 5 * 60 * 1000; // 5 นาที
-  const siteName = process.env.SITE_NAME || 'Soil Sensor';
-  const ref = Math.floor(100000 + Math.random() * 900000).toString();
+    console.log(`📧 Sending OTP to: ${email}`);
 
-  // เก็บ OTP ชั่วคราวในหน่วยความจำ พร้อมรีเซ็ตตัวจับเวลาเมื่อขอใหม่
-  global.otpStore = global.otpStore || {};
-  const previous = global.otpStore[email];
-  if (previous && previous.timeout) {
-    clearTimeout(previous.timeout);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const ttlMs = 5 * 60 * 1000; // 5 นาที
+    const siteName = process.env.SITE_NAME || 'Soil Sensor';
+    const ref = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // เก็บ OTP ชั่วคราวในหน่วยความจำ พร้อมรีเซ็ตตัวจับเวลาเมื่อขอใหม่
+    global.otpStore = global.otpStore || {};
+    const previous = global.otpStore[email];
+    if (previous && previous.timeout) {
+      clearTimeout(previous.timeout);
+    }
+    const timeout = setTimeout(() => {
+      delete global.otpStore[email];
+    }, ttlMs);
+    global.otpStore[email] = { code: otp, expiresAt: Date.now() + ttlMs, timeout, ref };
+
+    const subject = `${siteName} - OTP สำหรับยืนยันอีเมล`;
+    const body = `รหัส OTP ของคุณคือ: ${otp}\n\nใช้ได้ภายใน 5 นาที\nจากระบบ ${siteName}\n\nหมายเลขอ้างอิง: ${ref}`;
+    await sendEmail(email, subject, body);
+
+    console.log(`✅ OTP sent to ${email}: ${otp} (ref: ${ref})`);
+
+    res.json({ 
+      success: true,
+      message: 'OTP sent successfully',
+      email: email,
+      ref: ref,
+      expiresIn: 300, // 5 minutes in seconds
+      nextStep: 'verify-otp' // บอก frontend ให้ไป step ถัดไป
+    });
+  } catch (err) {
+    console.error('❌ Error sending OTP:', err);
+    res.status(500).json({ 
+      success: false,
+      message: 'เกิดข้อผิดพลาดในการส่ง OTP',
+      error: err.message 
+    });
   }
-  const timeout = setTimeout(() => {
-    delete global.otpStore[email];
-  }, ttlMs);
-  global.otpStore[email] = { code: otp, expiresAt: Date.now() + ttlMs, timeout, ref };
-
-  const subject = `${siteName} - OTP สำหรับยืนยันอีเมล`;
-  const body = `รหัส OTP ของคุณคือ: ${otp}\n\nใช้ได้ภายใน 5 นาที\nจากระบบ ${siteName}\n\nหมายเลขอ้างอิง: ${ref}`;
-  await sendEmail(email, subject, body);
-
-  res.json({ message: 'OTP sent', ref });
 });
 
 router.put('/reset-password', async (req, res) => {
@@ -328,10 +348,6 @@ router.put('/change-password', require('../middleware/auth').authMiddleware, asy
   res.json({ message: 'Password changed' });
 });
 
-router.get('/check-email/:email', async (req, res) => {
-  const { rows } = await pool.query('SELECT 1 FROM users WHERE user_email=$1 LIMIT 1', [req.params.email]);
-  res.json({ exists: !!rows[0] });
-});
 
 router.get('/check-username/:username', async (req, res) => {
   const { rows } = await pool.query('SELECT 1 FROM users WHERE user_name=$1 LIMIT 1', [req.params.username]);
@@ -757,6 +773,80 @@ router.post('/debug-token', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// Check email availability
+router.get('/check-email/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    
+    console.log(`🔍 Checking email availability for: ${email}`);
+    
+    // Check if email exists in database
+    const { rows } = await pool.query(
+      'SELECT userid, user_email FROM users WHERE user_email = $1',
+      [email]
+    );
+    
+    const emailExists = rows.length > 0;
+    
+    console.log(`📧 Email ${email} exists: ${emailExists}`);
+    
+    res.json({
+      email: email,
+      available: !emailExists,
+      exists: emailExists,
+      message: emailExists ? 'Email already registered' : 'Email available'
+    });
+    
+  } catch (err) {
+    console.error('❌ Error checking email:', err);
+    res.status(500).json({ 
+      message: 'เกิดข้อผิดพลาดในการตรวจสอบอีเมลกับฐานข้อมูล',
+      error: err.message 
+    });
+  }
+});
+
+
+// Verify OTP
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    
+    console.log(`🔐 Verifying OTP for: ${email}`);
+    
+    // Check OTP in database
+    const { rows } = await pool.query(
+      'SELECT otp, expires_at FROM otp_verification WHERE email = $1 AND expires_at > NOW()',
+      [email]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(400).json({ 
+        message: 'OTP not found or expired',
+        valid: false 
+      });
+    }
+    
+    const storedOtp = rows[0].otp;
+    const isValid = storedOtp === otp;
+    
+    console.log(`🔐 OTP verification for ${email}: ${isValid ? 'VALID' : 'INVALID'}`);
+    
+    res.json({
+      message: isValid ? 'OTP verified successfully' : 'Invalid OTP',
+      valid: isValid,
+      email: email
+    });
+    
+  } catch (err) {
+    console.error('❌ Error verifying OTP:', err);
+    res.status(500).json({ 
+      message: 'เกิดข้อผิดพลาดในการตรวจสอบ OTP',
+      error: err.message 
+    });
   }
 });
 
