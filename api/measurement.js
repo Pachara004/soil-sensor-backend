@@ -136,20 +136,20 @@ router.post('/from-firebase', async (req, res) => {
     // Insert measurement into PostgreSQL
     const { rows } = await pool.query(
       `INSERT INTO measurement (
-        deviceid, 
-        measurement_date, 
-        measurement_time, 
-        temperature, 
-        moisture, 
-        ph, 
-        phosphorus, 
-        potassium, 
-        nitrogen, 
-        lng, 
-        lat, 
+      deviceid,
+      measurement_date,
+      measurement_time,
+      temperature,
+      moisture,
+      ph,
+      phosphorus,
+      potassium,
+      nitrogen,
+      lng,
+      lat,
         created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-      RETURNING *`,
+       RETURNING *`,
       [
         finalDeviceId,
         measurementDate,
@@ -223,7 +223,7 @@ router.post('/create-area', authMiddleware, async (req, res) => {
 
     res.status(201).json({ 
       message: 'Area created successfully', 
-      area: rows[0] 
+      area: rows[0]
     });
 
   } catch (err) {

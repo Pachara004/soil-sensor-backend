@@ -78,7 +78,7 @@ const allowedOrigins = [
   'http://localhost:3000',           // Backend dev server
   'http://127.0.0.1:4200',
   'http://127.0.0.1:3000',
-  'https://soil-sensor-frontend.vercel.app',  // Production frontend (ถ้ามี)
+  'https://soil-sensor-frontend-chi.vercel.app',  // Production frontend (Vercel)
   'https://soil-sensor-backend.onrender.com', // Production backend
   process.env.FRONTEND_URL,          // จาก .env
   process.env.CORS_ORIGIN            // จาก .env
