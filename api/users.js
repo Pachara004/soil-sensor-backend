@@ -72,7 +72,44 @@ router.get('/regular', authMiddleware, async (req, res) => {
   }
 });
 
-// Get user by ID
+// Alias endpoints for Angular compatibility - ต้องอยู่ก่อน /:id
+router.get('/profile', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      [req.user.userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({ user: rows[0] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      [req.user.userid]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({ user: rows[0] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get user by ID - ไว้หลัง specific routes แล้ว
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -83,7 +120,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
+      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
       [id]
     );
 
@@ -272,42 +309,6 @@ router.get('/stats/overview', authMiddleware, async (req, res) => {
   }
 });
 
-// Alias endpoints for Angular compatibility
-router.get('/profile', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
-      [req.user.userid]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    return res.json({ user: rows[0] });
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-router.get('/me', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT userid, user_name, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
-      [req.user.userid]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    return res.json({ user: rows[0] });
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
 // GET /api/user/reports - ดึง reports ของ user ปัจจุบัน
 router.get('/reports', authMiddleware, async (req, res) => {
   try {
@@ -397,44 +398,6 @@ router.put('/:id/password', authMiddleware, async (req, res) => {
     res.json({ message: 'Password changed successfully' });
   } catch (err) {
     console.error('❌ Error changing password:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Get current user profile
-router.get('/profile', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
-      [req.user.userid]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({ user: rows[0] });
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Get current user profile (me endpoint)
-router.get('/me', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT userid, user_name, user_email, user_phone, role, firebase_uid, created_at, updated_at FROM users WHERE userid = $1',
-      [req.user.userid]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({ user: rows[0] });
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
     res.status(500).json({ message: err.message });
   }
 });

@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
 const admin = require('firebase-admin');
-const { realtimeService } = require('../server');
+// Avoid requiring server here to prevent circular dependency with server.js
+// If we need to send commands to devices, write directly to Firebase /commands/{deviceId}
 
 // ดึงข้อมูล measurement แบบ real-time จาก Firebase
 router.get('/live-measurements/:deviceId', async (req, res) => {
@@ -90,10 +91,18 @@ router.post('/next-measurement/:deviceId', async (req, res) => {
     console.log(`🎯 Sending next measurement command to device: ${deviceId}`);
     console.log(`📍 Next location: areasid=${areasid}, lat=${lat}, lng=${lng}`);
     
-    // Use WebSocket service to send command
-    await realtimeService.sendNextMeasurementCommand(deviceId, areasid, lat, lng);
-    
-    console.log(`✅ Next measurement command sent to device: ${deviceId}`);
+    // Write command directly to Firebase so the realtime service (server) can pick it up
+    const db = admin.database();
+    await db.ref(`/commands/${deviceId}`).set({
+      action: 'next_measurement',
+      areasid: areasid,
+      lat: lat,
+      lng: lng,
+      timestamp: new Date().toISOString(),
+      status: 'pending'
+    });
+
+    console.log(`✅ Next measurement command queued in Firebase for device: ${deviceId}`);
     
     res.json({
       message: 'Next measurement command sent successfully',

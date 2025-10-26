@@ -108,6 +108,7 @@ const io = socketIo(server, {
   },
   transports: ['websocket', 'polling']
 });
+console.log('🔌 Socket.IO initialized');
 
 // CORS options with detailed logging
 const corsOptions = {
@@ -157,13 +158,18 @@ const corsOptions = {
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+console.log('🌐 CORS middleware applied');
 
 // Handle preflight requests
-app.options('*', cors(corsOptions));
+// Handle preflight requests
+// Disabled automatic preflight registration temporarily to avoid path-to-regexp error during startup
+// app.options('*', cors(corsOptions));
+// console.log('⚙️ CORS preflight handler registered');
 
 // Middlewares
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+console.log('🧰 Express body parsers registered');
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -175,6 +181,7 @@ app.use((req, res, next) => {
 connectDB().catch((err) => {
   console.error('❌ Failed to connect PostgreSQL:', err && err.message);
 });
+console.log('🗄️ connectDB invoked (async)');
 
 /* --------------------
  * Nodemailer (Email)
@@ -305,11 +312,31 @@ io.on('connection', (socket) => {
  * API Routes
  * -------------------- */
 
+// Small helper to safely require route modules and log load errors.
+function tryLoadRoute(mountPath, requirePath, protectedRoute = false) {
+  try {
+    console.log(`➡️ Loading route ${mountPath} -> ${requirePath}`);
+    const router = require(requirePath);
+    if (protectedRoute) {
+      app.use(mountPath, authMiddleware, router);
+    } else {
+      app.use(mountPath, router);
+    }
+    console.log(`✅ Loaded ${mountPath}`);
+  } catch (err) {
+    console.error(`❌ Failed to load ${mountPath} -> ${requirePath}`);
+    console.error(err && err.stack ? err.stack : err);
+    // Re-throw so nodemon / start script can show crash stack if desired
+    throw err;
+  }
+}
+
 // Auth routes (JWT + PostgreSQL)
-app.use('/api/auth', require('./api/auth'));
+console.log('🔁 About to load API routes');
+tryLoadRoute('/api/auth', './api/auth');
 
 // Device routes (PostgreSQL) - some endpoints don't need auth
-app.use('/api/devices', require('./api/device'));
+tryLoadRoute('/api/devices', './api/device');
 
 // Profile endpoint (standalone)
 app.get('/api/profile', authMiddleware, async (req, res) => {
@@ -332,53 +359,53 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 });
 
 // User routes (PostgreSQL)
-app.use('/api/users', authMiddleware, require('./api/users'));
+tryLoadRoute('/api/users', './api/users', true);
 
 // User alias routes for Angular compatibility
-app.use('/api/user', authMiddleware, require('./api/users'));
+tryLoadRoute('/api/user', './api/users', true);
 
 // GPS routes (PostgreSQL)
-app.use('/api/gps', require('./api/gps'));
+tryLoadRoute('/api/gps', './api/gps');
 
 // Measurement routes (PostgreSQL)
-app.use('/api/measurements', authMiddleware, require('./api/measurement'));
+tryLoadRoute('/api/measurements', './api/measurement', true);
 
 // Firebase measurement endpoint (no auth required)
-app.use('/api/measurement-points', require('./api/measurement-points'));
-app.use('/api/manual-points', require('./api/manual-point-id'));
-app.use('/api/sequential', require('./api/sequential-measurement'));
-app.use('/api/gps-coordinates', require('./api/gps-coordinates'));
+tryLoadRoute('/api/measurement-points', './api/measurement-points');
+tryLoadRoute('/api/manual-points', './api/manual-point-id');
+tryLoadRoute('/api/sequential', './api/sequential-measurement');
+tryLoadRoute('/api/gps-coordinates', './api/gps-coordinates');
 
 // Areasid sync routes
-app.use('/api/areasid', require('./api/areasid-sync'));
+tryLoadRoute('/api/areasid', './api/areasid-sync');
 
 // Real-time measurement routes
-app.use('/api/realtime', require('./api/realtime-measurement'));
+tryLoadRoute('/api/realtime', './api/realtime-measurement');
 
 // Device ownership routes
-app.use('/api/device', require('./api/device-ownership'));
+tryLoadRoute('/api/device', './api/device-ownership');
 
 // Device management routes (with Firebase sync)
-app.use('/api/devices', require('./api/device-management'));
+tryLoadRoute('/api/devices', './api/device-management');
 
 // Area routes (PostgreSQL)
-app.use('/api/areas', authMiddleware, require('./api/area'));
+tryLoadRoute('/api/areas', './api/area', true);
 
 // Reports routes (PostgreSQL)
-app.use('/api/reports', require('./api/reports'));
-app.use('/api/user', require('./api/user-reports'));
+tryLoadRoute('/api/reports', './api/reports');
+tryLoadRoute('/api/user', './api/user-reports');
 
 // Image routes (PostgreSQL)
-app.use('/api/images', authMiddleware, require('./api/image'));
+tryLoadRoute('/api/images', './api/image', true);
 
 // Admin routes (PostgreSQL)
-app.use('/api/admin', require('./api/admin'));
+tryLoadRoute('/api/admin', './api/admin');
 
 // Firebase routes (Firebase Realtime Database)
-app.use('/api/firebase', require('./api/firebase'));
+tryLoadRoute('/api/firebase', './api/firebase');
 
 // Firebase measurement sync routes
-app.use('/api/firebase-measurements', require('./api/firebase-measurement'));
+tryLoadRoute('/api/firebase-measurements', './api/firebase-measurement');
 
 /* --------------------
  * Global Error Handler
