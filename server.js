@@ -37,6 +37,7 @@ if (hasFirebaseEnv) {
         'base64'
       ).toString('utf8');
     } catch (e) {
+      console.error('Failed to decode Firebase private key:', e.message);
     }
   }
 
@@ -54,12 +55,15 @@ if (hasFirebaseEnv) {
       });
 
       db = admin.database();
+      console.log('✅ Firebase Admin initialized successfully');
     } else {
+      console.warn('⚠️ Firebase private key not found');
     }
   } catch (err) {
-    console.error('Firebase initialization failed:', err.message);
+    console.error('❌ Firebase initialization failed:', err.message);
   }
 } else {
+  console.warn('⚠️ Firebase environment variables not configured');
 }
 
 /* --------------------
@@ -72,45 +76,68 @@ const server = http.createServer(app);
 const realtimeService = new RealtimeMeasurementService(server);
 
 // ================== CORS Configuration ==================
-// กำหนด allowed origins
+// กำหนด allowed origins - รองรับทั้ง production และ development
 const allowedOrigins = [
-  'http://localhost:4200',           // Angular dev server
-  'http://localhost:3000',           // Backend dev server
+  // Development
+  'http://localhost:4200',
+  'http://localhost:3000',
   'http://127.0.0.1:4200',
   'http://127.0.0.1:3000',
-  'https://soil-sensor-frontend-chi.vercel.app',  // Production frontend (Vercel)
-  'https://soil-sensor-backend.onrender.com', // Production backend
-  process.env.FRONTEND_URL,          // จาก .env
-  process.env.CORS_ORIGIN            // จาก .env
+  
+  // Production - Vercel (Frontend)
+  'https://soil-sensor-frontend-chi.vercel.app',
+  'https://soil-sensor-frontend.vercel.app',
+  
+  // Production - Render (Backend)
+  'https://soil-sensor-backend.onrender.com',
+  
+  // Environment variables
+  process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  process.env.ALLOWED_ORIGIN
 ].filter(Boolean); // กรอง undefined/null ออก
+
+console.log('🌐 Allowed Origins:', allowedOrigins);
 
 // Socket.IO with CORS
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     credentials: true,
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
   },
   transports: ['websocket', 'polling']
 });
 
-// CORS options
+// CORS options with detailed logging
 const corsOptions = {
   origin: function (origin, callback) {
+    console.log('🔍 CORS Origin Check:', origin || 'NO ORIGIN');
+    
     // อนุญาต requests ที่ไม่มี origin (เช่น mobile apps, Postman, ESP32)
     if (!origin) {
+      console.log('✅ Allowing request without origin (mobile/postman/esp32)');
       return callback(null, true);
     }
     
     // ตรวจสอบว่า origin อยู่ใน whitelist หรือไม่
-    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
-      callback(null, true);
-    } else {
-      console.warn('⚠️  CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ Origin allowed:', origin);
+      return callback(null, true);
     }
+    
+    // Development mode - อนุญาตทุก localhost
+    if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
+      console.log('✅ Development: Allowing localhost:', origin);
+      return callback(null, true);
+    }
+    
+    // Block
+    console.warn('❌ CORS blocked origin:', origin);
+    console.warn('📋 Allowed origins:', allowedOrigins);
+    callback(new Error('Not allowed by CORS'));
   },
-  credentials: true,                    // อนุญาต cookies
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -119,22 +146,34 @@ const corsOptions = {
     'X-API-Key',
     'x-api-key',
     'Accept',
-    'Origin'
+    'Origin',
+    'Access-Control-Allow-Origin'
   ],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 600  // Cache preflight request เป็นเวลา 10 นาที
+  exposedHeaders: ['Content-Range', 'X-Content-Range', 'Authorization'],
+  maxAge: 600,  // Cache preflight request เป็นเวลา 10 นาที
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
 
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
 // Middlewares
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`📨 ${req.method} ${req.path} - Origin: ${req.headers.origin || 'NO ORIGIN'}`);
+  next();
+});
+
 // Connect PostgreSQL
 connectDB().catch((err) => {
-  console.error('Failed to connect PostgreSQL:', err && err.message);
+  console.error('❌ Failed to connect PostgreSQL:', err && err.message);
 });
 
 /* --------------------
@@ -145,16 +184,11 @@ let emailReady = false;
 
 if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   transporter = nodemailer.createTransport({
-    // ใช้ service: 'gmail' หรือตั้ง host/port เองก็ได้ แต่ไม่ต้องใส่ทั้งคู่
     service: 'gmail',
     auth: {
-      user: process.env.EMAIL_USER, // ต้องเป็น Gmail
-      pass: process.env.EMAIL_PASS, // ต้องเป็น App Password 16 ตัว
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS, // App Password 16 ตัว
     },
-    // ตัวเลือก: หากไม่ใช้ service ให้คอมเมนต์ข้างบนแล้วใช้ด้านล่างแทน
-    // host: 'smtp.gmail.com',
-    // port: 465,
-    // secure: true,
   });
 
   // ตรวจสอบการเชื่อมต่อ SMTP
@@ -162,17 +196,15 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     .verify()
     .then(() => {
       emailReady = true;
+      console.log('✅ Email service ready');
     })
     .catch((err) => {
       emailReady = false;
-      console.error('Nodemailer verify failed:', err.message);
+      console.error('❌ Nodemailer verify failed:', err.message);
     });
 } else {
+  console.warn('⚠️ Email credentials not configured');
 }
-
-/* --------------------
- * Helper: Auth Guard (Firebase ID token)
- * -------------------- */
 
 /* --------------------
  * Health Check
@@ -182,6 +214,8 @@ app.get('/health', (req, res) => {
     status: 'OK',
     firebase: db ? 'connected' : 'disconnected',
     email: emailReady ? 'ready' : 'not_ready',
+    environment: process.env.NODE_ENV || 'development',
+    allowedOrigins: allowedOrigins,
     timestamp: new Date().toISOString(),
   });
 });
@@ -191,6 +225,8 @@ app.get('/', (req, res) => {
   res.json({
     message: 'Soil Sensor Backend API',
     status: 'OK',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString()
   });
 });
@@ -199,6 +235,7 @@ app.get('/', (req, res) => {
  * Socket.IO handlers
  * -------------------- */
 io.on('connection', (socket) => {
+  console.log('🔌 Client connected:', socket.id);
 
   socket.on('join-device', (deviceId) => {
     if (!deviceId) {
@@ -207,6 +244,7 @@ io.on('connection', (socket) => {
     }
 
     socket.join(deviceId);
+    console.log(`📱 Device ${deviceId} joined room`);
 
     if (!db) {
       socket.emit('error', { message: 'Firebase not available' });
@@ -237,6 +275,7 @@ io.on('connection', (socket) => {
         return;
       }
 
+      console.log(`💾 Saving measurement for device: ${deviceId}`);
 
       // โปรเจ็กต์นี้ปิด MongoDB อยู่ — ทำเฉพาะเคลียร์ live ใน Firebase
       if (db) {
@@ -249,12 +288,13 @@ io.on('connection', (socket) => {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      console.error('Error saving measurement:', err);
+      console.error('❌ Error saving measurement:', err);
       socket.emit('error', { message: err.message });
     }
   });
 
   socket.on('disconnect', () => {
+    console.log('🔌 Client disconnected:', socket.id);
     if (socket.liveRef && socket.onLiveUpdate) {
       socket.liveRef.off('value', socket.onLiveUpdate);
     }
@@ -262,7 +302,7 @@ io.on('connection', (socket) => {
 });
 
 /* --------------------
- * Example APIs
+ * API Routes
  * -------------------- */
 
 // Auth routes (JWT + PostgreSQL)
@@ -286,7 +326,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 
     res.json({ user: rows[0] });
   } catch (err) {
-    console.error('Error fetching user profile:', err);
+    console.error('❌ Error fetching user profile:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -302,17 +342,22 @@ app.use('/api/gps', require('./api/gps'));
 
 // Measurement routes (PostgreSQL)
 app.use('/api/measurements', authMiddleware, require('./api/measurement'));
+
 // Firebase measurement endpoint (no auth required)
 app.use('/api/measurement-points', require('./api/measurement-points'));
 app.use('/api/manual-points', require('./api/manual-point-id'));
 app.use('/api/sequential', require('./api/sequential-measurement'));
 app.use('/api/gps-coordinates', require('./api/gps-coordinates'));
+
 // Areasid sync routes
 app.use('/api/areasid', require('./api/areasid-sync'));
+
 // Real-time measurement routes
 app.use('/api/realtime', require('./api/realtime-measurement'));
+
 // Device ownership routes
 app.use('/api/device', require('./api/device-ownership'));
+
 // Device management routes (with Firebase sync)
 app.use('/api/devices', require('./api/device-management'));
 
@@ -321,7 +366,6 @@ app.use('/api/areas', authMiddleware, require('./api/area'));
 
 // Reports routes (PostgreSQL)
 app.use('/api/reports', require('./api/reports'));
-app.use('/api/user', require('./api/user-reports'));
 app.use('/api/user', require('./api/user-reports'));
 
 // Image routes (PostgreSQL)
@@ -336,58 +380,67 @@ app.use('/api/firebase', require('./api/firebase'));
 // Firebase measurement sync routes
 app.use('/api/firebase-measurements', require('./api/firebase-measurement'));
 
-
 /* --------------------
  * Global Error Handler
  * -------------------- */
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  return res.status(500).json({
-    message: 'Internal server error',
-    error:
-      process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+  console.error('❌ Unhandled error:', err);
+  console.error('❌ Request URL:', req.url);
+  console.error('❌ Request Method:', req.method);
+  console.error('❌ Request Body:', req.body);
+  
+  return res.status(err.status || 500).json({
+    message: err.message || 'Internal server error',
+    error: process.env.NODE_ENV === 'development' ? err.stack : 'Something went wrong',
   });
 });
 
 /* --------------------
- * 404
+ * 404 Handler
  * -------------------- */
-// แทนที่บล็อก 404 เดิม
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  console.warn('⚠️ Route not found:', req.method, req.path);
+  res.status(404).json({ 
+    message: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
 });
-
 
 /* --------------------
  * Start Server
  * -------------------- */
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-server.listen(PORT, '0.0.0.0', (err) => {
+server.listen(PORT, HOST, (err) => {
   if (err) {
-    console.error('Failed to start server:', err);
+    console.error('❌ Failed to start server:', err);
     process.exit(1);
   }
-  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
-  console.log(`🌐 Accessible from: http://172.16.0.241:${PORT}`);
-  console.log(`🌐 Also accessible from: http://10.197.169.7:${PORT}`);
-  console.log(`📡 ESP32 can connect from: http://172.16.0.241:${PORT}`);
-  console.log(`🔧 Make sure Windows Firewall allows port ${PORT}`);
+  
+  console.log('\n🚀 ================================');
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔥 Firebase: ${db ? 'Connected' : 'Disconnected'}`);
+  console.log(`📧 Email: ${emailReady ? 'Ready' : 'Not Ready'}`);
+  console.log(`🌍 CORS Origins: ${allowedOrigins.length} configured`);
+  console.log('🚀 ================================\n');
 });
 
 /* --------------------
- * Server Errors & Shutdown
+ * Server Error Handlers
  * -------------------- */
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use`);
+    console.error(`❌ Port ${PORT} is already in use`);
     process.exit(1);
   } else {
-    console.error('Server error:', err);
+    console.error('❌ Server error:', err);
   }
 });
 
-// Global error handler
+// Global error handlers
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
   console.error('❌ Stack:', error.stack);
@@ -397,27 +450,19 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Global error handler for Express
-app.use((error, req, res, next) => {
-  console.error('❌ Express Error:', error);
-  console.error('❌ Request URL:', req.url);
-  console.error('❌ Request Method:', req.method);
-  console.error('❌ Request Body:', req.body);
-  
-  res.status(500).json({
-    message: 'Internal server error',
-    error: error.message
-  });
-});
-
+// Graceful shutdown
 process.on('SIGTERM', () => {
+  console.log('⚠️ SIGTERM received, closing server gracefully...');
   server.close(() => {
+    console.log('✅ Server closed');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
+  console.log('⚠️ SIGINT received, closing server gracefully...');
   server.close(() => {
+    console.log('✅ Server closed');
     process.exit(0);
   });
 });
