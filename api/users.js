@@ -343,6 +343,27 @@ router.get('/reports', authMiddleware, async (req, res) => {
     });
   }
 });
+
+// GET /api/user/devices - ดึง devices ที่ผูกกับผู้ใช้ปัจจุบัน
+router.get('/devices', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userid;
+    console.log('📨 Fetching devices for user:', userId);
+
+    const { rows } = await pool.query(
+      `SELECT deviceid, device_name, userid, device_type, status, created_at, updated_at
+       FROM device
+       WHERE userid = $1
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    res.json({ devices: rows });
+  } catch (err) {
+    console.error('❌ Error fetching user devices:', err);
+    res.status(500).json({ message: 'Failed to fetch devices', error: err.message });
+  }
+});
 // Change password (both admin and user)
 router.put('/:id/password', authMiddleware, async (req, res) => {
   try {

@@ -405,6 +405,70 @@ router.delete('/delete-device/:deviceId', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/devices/claim - ผูก (claim) device กับผู้ใช้ที่ authenticate แล้ว
+router.post('/claim', authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { deviceId, deviceName } = req.body || {};
+    if (!deviceId && !deviceName) return res.status(400).json({ message: 'deviceId or deviceName is required' });
+
+    const userId = req.user.userid;
+    const userEmail = req.user.email || null;
+    const userName = req.user.user_name || req.user.username || null;
+
+    await client.query('BEGIN');
+
+    // Find device row and lock it
+    const findSql = deviceId
+      ? 'SELECT * FROM device WHERE deviceid = $1 FOR UPDATE'
+      : 'SELECT * FROM device WHERE device_name = $1 FOR UPDATE';
+    const findParam = deviceId ? [deviceId] : [deviceName];
+    const { rows } = await client.query(findSql, findParam);
+    if (!rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    const deviceRow = rows[0];
+    if (deviceRow.userid) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Device already claimed' });
+    }
+
+    // Claim device
+    const updateSql = 'UPDATE device SET userid = $1, updated_at = NOW() WHERE deviceid = $2 RETURNING deviceid, device_name, userid, device_type, status, created_at, updated_at';
+    const targetDeviceId = deviceRow.deviceid;
+    const { rows: updated } = await client.query(updateSql, [userId, targetDeviceId]);
+    const updatedDevice = updated[0];
+
+    // Sync to Firebase
+    try {
+      if (admin.apps.length) {
+        const db = admin.database();
+        await db.ref(`/devices/${updatedDevice.device_name}`).update({
+          userid: userId,
+          userEmail: userEmail,
+          userName: userName,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      await client.query('COMMIT');
+      return res.json({ device: updatedDevice });
+    } catch (fbErr) {
+      console.error('❌ Firebase sync failed, rolling back', fbErr);
+      await client.query('ROLLBACK');
+      return res.status(500).json({ message: 'Failed to sync to Firebase', error: fbErr.message });
+    }
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+    console.error('❌ Claim device error:', err);
+    return res.status(500).json({ message: 'Internal error', error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ดึงรายการอุปกรณ์ของ user พร้อมข้อมูลจาก Firebase
 router.get('/my-devices', authMiddleware, async (req, res) => {
   try {
