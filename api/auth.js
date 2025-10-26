@@ -221,17 +221,25 @@ router.post('/send-otp', async (req, res) => {
 
     const subject = `${siteName} - OTP สำหรับยืนยันอีเมล`;
     const body = `รหัส OTP ของคุณคือ: ${otp}\n\nใช้ได้ภายใน 5 นาที\nจากระบบ ${siteName}\n\nหมายเลขอ้างอิง: ${ref}`;
-    await sendEmail(email, subject, body);
 
-    console.log(`✅ OTP sent to ${email}: ${otp} (ref: ${ref})`);
+    let emailSent = true;
+    try {
+      await sendEmail(email, subject, body);
+      console.log(`✅ OTP sent to ${email}: ${otp} (ref: ${ref})`);
+    } catch (e) {
+      // Log and continue — we still keep OTP in memory so frontend can proceed in dev/test
+      emailSent = false;
+      console.error('❌ sendEmail failed:', e && e.message ? e.message : e);
+    }
 
     res.json({ 
       success: true,
-      message: 'OTP sent successfully',
+      message: emailSent ? 'OTP sent successfully' : 'OTP generated (email not sent - email service unavailable)',
       email: email,
       ref: ref,
       expiresIn: 300, // 5 minutes in seconds
-      nextStep: 'verify-otp' // บอก frontend ให้ไป step ถัดไป
+      nextStep: 'verify-otp', // บอก frontend ให้ไป step ถัดไป
+      emailSent: emailSent
     });
   } catch (err) {
     console.error('❌ Error sending OTP:', err);
